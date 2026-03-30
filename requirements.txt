@@ -1,0 +1,32 @@
+#fastapi==0.115.0
+#uvicorn[standard]==0.30.6
+#websockets==13.1
+#yt-dlp==2024.11.18
+#requests==2.32.3
+#beautifulsoup4==4.12.3
+#aiofiles==24.1.0
+#python-multipart==0.0.12
+#url_cffi==0.7.3
+
+# Core server
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
+# Download engine
+# Use nightly yt-dlp — it gets TikTok/YouTube fixes weeks before stable
+yt-dlp @ https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.tar.gz
+
+# curl_cffi >= 0.10 is REQUIRED for yt-dlp impersonation (TikTok, Kick, etc.)
+# 0.7.x shows as "unsupported" in yt-dlp debug output — do NOT use it
+curl_cffi>=0.10.0
+
+# HTTP + parsing
+requests==2.32.3
+beautifulsoup4==4.12.3
+
+# Async file I/O and multipart
+aiofiles==24.1.0
+python-multipart==0.0.12
+
+# WebSocket support (already included via uvicorn[standard] but explicit is better)
+websockets>=13.0

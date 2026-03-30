@@ -1,0 +1,345 @@
+"""
+downloader.py — Production download engine with format/quality selection
+
+Video qualities : best, 4k, 1440p, 1080p, 720p
+Audio formats   : mp3, flac, wav, opus, aac, alac
+"""
+
+import yt_dlp
+import requests
+import mimetypes
+import os
+from pathlib import Path
+from bs4 import BeautifulSoup
+from typing import Optional, Callable
+
+# ── Download directory ─────────────────────────────────────────────────────────
+DOWNLOAD_DIR = str(Path.home() / "Downloads" / "Fetchr")
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+# ── Optional proxy ─────────────────────────────────────────────────────────────
+PROXY: Optional[str] = os.environ.get("FETCHR_PROXY", None)
+
+# ── Direct file extensions ─────────────────────────────────────────────────────
+DIRECT_EXTS = {
+    "pdf", "zip", "rar", "7z", "tar", "gz", "bz2",
+    "exe", "dmg", "apk", "msi", "deb",
+    "mp3", "mp4", "mkv", "avi", "mov", "webm", "flv", "wmv",
+    "m4a", "aac", "ogg", "wav", "flac", "opus",
+    "jpg", "jpeg", "png", "gif", "webp", "bmp",
+    "docx", "xlsx", "pptx", "doc", "xls", "ppt",
+    "csv", "epub", "mobi",
+}
+
+VIDEO_DOMAINS = [
+    "youtube.com", "youtu.be", "vimeo.com", "twitch.tv",
+    "tiktok.com", "vm.tiktok.com", "vt.tiktok.com",
+    "dailymotion.com", "twitter.com", "x.com", 
+    "spotify.com", "soundcloud.com", "bandcamp.com",
+    "mixcloud.com","deezer.com", "music.apple.com", "music.youtube.com",
+    "instagram.com", "facebook.com", "reddit.com",
+    "streamable.com", "rumble.com", "odysee.com", "bitchute.com",
+]
+VIDEO_PATH_HINTS = [".m3u8", ".m3u", "/stream", "/watch", "/video", "/play"]
+
+# YouTube player clients — android/ios bypass bot detection on server IPs
+YOUTUBE_CLIENTS = ["android", "ios", "tv_embedded", "web_creator"]
+
+# TikTok API hostnames — rotating reduces "Unable to extract" errors
+TIKTOK_API_HOSTS = [
+    "api22-normal-c-useast2a.tiktokv.com",
+    "api19-normal-c-useast1a.tiktokv.com",
+    "api16-normal-c-useast1a.tiktokv.com",
+    "api16-normal-useast5.tiktokv.com",
+]
+
+# ── Video quality → yt-dlp format string ──────────────────────────────────────
+# Prefer mp4 video + m4a audio for best compatibility, fallback to any format.
+# Heights are upper bounds so "1080p" also matches 1080p content.
+VIDEO_FORMAT_MAP = {
+    "best":  "bestvideo+bestaudio/best",
+    "4k":    "bestvideo[height<=2160][vcodec^=vp9]+bestaudio/bestvideo[height<=2160][vcodec^=av01]+bestaudio/bestvideo[height<=2160]+bestaudio",
+    "1440p": "bestvideo[height<=1440][vcodec^=vp9]+bestaudio/bestvideo[height<=1440][vcodec^=av01]+bestaudio/bestvideo[height<=1440]+bestaudio",
+    "1080p": "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio",
+    "720p":  "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio",
+}
+
+# ── Audio codec config ─────────────────────────────────────────────────────────
+# Each entry: (FFmpeg codec name, quality/bitrate string, output extension label)
+# "quality" for lossy = bitrate kbps; for lossless = "0" (best/lossless)
+# ALAC outputs inside .m4a container with Apple Lossless codec (NOT AAC/mp4a)
+# Hi-Res FLAC/WAV = download highest bitrate source then convert losslessly
+AUDIO_FORMAT_MAP = {
+    "mp3":  ("mp3",  "320",  "mp3"),   # MP3 320kbps
+    "flac": ("flac", "0",    "flac"),  # FLAC lossless
+    "wav":  ("wav",  "0",    "wav"),   # WAV lossless
+    "opus": ("opus", "0",    "opus"),  # Opus (kept as-is from source when possible)
+    "aac":  ("aac",  "0",    "m4a"),   # AAC in M4A container
+    "alac": ("alac", "0",    "m4a"),   # Apple Lossless in M4A container
+}
+
+
+# ── Type detection ─────────────────────────────────────────────────────────────
+def detect_type(url: str) -> str:
+    clean = url.split("?")[0].lower()
+    ext = clean.split(".")[-1]
+    if ext in DIRECT_EXTS:
+        return "file"
+    for domain in VIDEO_DOMAINS:
+        if domain in url.lower():
+            return "video"
+    for hint in VIDEO_PATH_HINTS:
+        if hint in clean:
+            return "video"
+    return "probe"
+
+
+def probe_url(url: str) -> str:
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        r = requests.head(url, headers=headers, timeout=10, allow_redirects=True)
+        if "filename" in r.headers.get("Content-Disposition", ""):
+            return "file"
+        ct = r.headers.get("Content-Type", "")
+        if "text/html" in ct:
+            return "ydlp"
+        if any(t in ct for t in ["application/", "video/", "audio/", "image/"]):
+            return "file"
+    except Exception:
+        pass
+    return "ydlp"
+
+
+# ── Filename extraction ────────────────────────────────────────────────────────
+def get_filename(response: requests.Response, url: str) -> str:
+    cd = response.headers.get("Content-Disposition", "")
+    if "filename=" in cd:
+        fname = cd.split("filename=")[-1].strip().strip('"\'').split(";")[0].strip()
+        if fname:
+            return fname
+    fname = url.split("?")[0].rstrip("/").split("/")[-1]
+    if not fname or "." not in fname:
+        ct = response.headers.get("Content-Type", "").split(";")[0].strip()
+        ext = mimetypes.guess_extension(ct) or ""
+        ext = ext.replace(".jpe", ".jpg")
+        fname = (fname or "download") + ext
+    return fname or "download"
+
+
+# ── yt-dlp options builders ────────────────────────────────────────────────────
+def build_video_opts(
+    quality: str,
+    progress_hook: Optional[Callable],
+    extra_extractor_args: Optional[dict] = None,
+) -> dict:
+    fmt = VIDEO_FORMAT_MAP.get(quality, VIDEO_FORMAT_MAP["best"])
+    container = "mkv" if quality in ("4k", "1440p") else "mp4"
+
+    opts = {
+        "outtmpl":             f"{DOWNLOAD_DIR}/%(title).100s.%(ext)s",
+        "format":              fmt,
+        "merge_output_format": container,   # used when merging separate streams
+        "remux_video":         container,   # forces container even on pre-merged files
+        "noplaylist":          True,
+        "quiet":               True,
+    }
+    if extra_extractor_args:
+        opts["extractor_args"] = extra_extractor_args
+    if PROXY:
+        opts["proxy"] = PROXY
+    if progress_hook:
+        opts["progress_hooks"] = [progress_hook]
+    return opts
+
+
+def build_audio_opts(
+    fmt: str,
+    progress_hook: Optional[Callable],
+    extra_extractor_args: Optional[dict] = None,
+) -> dict:
+    codec, quality, _ = AUDIO_FORMAT_MAP.get(fmt, AUDIO_FORMAT_MAP["mp3"])
+    opts = {
+        "outtmpl":    f"{DOWNLOAD_DIR}/%(title).100s.%(ext)s",
+        # bestaudio ensures we get the highest quality audio stream available
+        "format":     "bestaudio/best",
+        "noplaylist": True,
+        "quiet":      True,
+        "postprocessors": [
+            {
+                "key":              "FFmpegExtractAudio",
+                "preferredcodec":   codec,
+                "preferredquality": quality,
+            },
+            # Embed metadata and thumbnail where the format supports it
+            {"key": "FFmpegMetadata"},
+        ],
+    }
+    if extra_extractor_args:
+        opts["extractor_args"] = extra_extractor_args
+    if PROXY:
+        opts["proxy"] = PROXY
+    if progress_hook:
+        opts["progress_hooks"] = [progress_hook]
+    return opts
+
+
+# ── Platform-specific downloaders ──────────────────────────────────────────────
+def _ydl_run(opts: dict) -> dict:
+    """Run yt-dlp with given opts, return result dict."""
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(ydl._ydl_info if hasattr(ydl, "_ydl_info") else None, download=False)
+
+
+def download_youtube(
+    url: str,
+    mode: str,
+    quality_or_fmt: str,
+    progress_hook: Optional[Callable] = None,
+) -> dict:
+    last_error = "Unknown error"
+    for client in YOUTUBE_CLIENTS:
+        try:
+            ea = {"youtube": {"player_client": [client]}}
+            if mode == "audio":
+                opts = build_audio_opts(quality_or_fmt, progress_hook, ea)
+            else:
+                opts = build_video_opts(quality_or_fmt, progress_hook, ea)
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                return {
+                    "status": "done",
+                    "type":   mode,
+                    "title":  info.get("title", "video"),
+                }
+        except Exception as e:
+            last_error = str(e)
+            if "Unsupported URL" in last_error:
+                break
+    raise Exception(last_error)
+
+
+def download_tiktok(
+    url: str,
+    mode: str,
+    quality_or_fmt: str,
+    progress_hook: Optional[Callable] = None,
+) -> dict:
+    last_error = "Unknown error"
+    for api_host in TIKTOK_API_HOSTS:
+        try:
+            ea = {"tiktok": {"api_hostname": [api_host]}}
+            if mode == "audio":
+                opts = build_audio_opts(quality_or_fmt, progress_hook, ea)
+            else:
+                opts = build_video_opts(quality_or_fmt, progress_hook, ea)
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                return {
+                    "status": "done",
+                    "type":   mode,
+                    "title":  info.get("title", "video"),
+                }
+        except Exception as e:
+            last_error = str(e)
+            if any(x in last_error for x in [
+                "Unsupported URL", "account is private",
+                "This video is unavailable", "does not exist",
+            ]):
+                break
+    raise Exception(last_error)
+
+
+def download_generic_video(
+    url: str,
+    mode: str,
+    quality_or_fmt: str,
+    progress_hook: Optional[Callable] = None,
+) -> dict:
+    if mode == "audio":
+        opts = build_audio_opts(quality_or_fmt, progress_hook)
+    else:
+        opts = build_video_opts(quality_or_fmt, progress_hook)
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        return {
+            "status": "done",
+            "type":   mode,
+            "title":  info.get("title", "video"),
+        }
+
+
+# ── Direct file download ───────────────────────────────────────────────────────
+def download_file(url: str, progress_hook: Optional[Callable] = None) -> dict:
+    headers = {
+        "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept":          "*/*",
+        "Accept-Encoding": "identity",
+    }
+    proxies = {"http": PROXY, "https": PROXY} if PROXY else None
+    r = requests.get(url, stream=True, headers=headers, timeout=60, proxies=proxies)
+    r.raise_for_status()
+
+    ct = r.headers.get("Content-Type", "")
+    if "text/html" in ct:
+        raise Exception("Server returned an HTML page instead of a downloadable file.")
+
+    filename = get_filename(r, url)
+    path = os.path.join(DOWNLOAD_DIR, filename)
+    total = int(r.headers.get("Content-Length", 0))
+    downloaded = 0
+
+    with open(path, "wb") as f:
+        for chunk in r.iter_content(chunk_size=65536):
+            if chunk:
+                f.write(chunk)
+                downloaded += len(chunk)
+                if progress_hook and total:
+                    progress_hook({
+                        "status":           "downloading",
+                        "downloaded_bytes": downloaded,
+                        "total_bytes":      total,
+                        "percent":          round(downloaded / total * 100, 1),
+                    })
+
+    return {"status": "done", "type": "file", "title": filename}
+
+
+# ── Main entry ─────────────────────────────────────────────────────────────────
+def download(
+    url: str,
+    mode: str = "video",            # "video" | "audio" | "file"
+    quality: str = "best",          # video: best/4k/1440p/1080p/720p
+    audio_fmt: str = "mp3",         # audio: mp3/flac/wav/opus/aac/alac
+    progress_hook: Optional[Callable] = None,
+) -> dict:
+    kind = detect_type(url)
+    if kind == "probe":
+        kind = probe_url(url)
+
+    url_lower = url.lower()
+
+    # Always direct-download known file types regardless of mode
+    if kind == "file":
+        try:
+            return download_file(url, progress_hook)
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    # Video or audio via yt-dlp
+    if kind in ("video", "ydlp"):
+        quality_or_fmt = audio_fmt if mode == "audio" else quality
+        try:
+            if "youtu" in url_lower:
+                return download_youtube(url, mode, quality_or_fmt, progress_hook)
+            elif "tiktok.com" in url_lower:
+                return download_tiktok(url, mode, quality_or_fmt, progress_hook)
+            else:
+                return download_generic_video(url, mode, quality_or_fmt, progress_hook)
+        except Exception as e:
+            # Last resort: maybe it's a direct CDN link
+            try:
+                return download_file(url, progress_hook)
+            except Exception:
+                return {"status": "error", "message": str(e)}
+
+    return {"status": "error", "message": "Unrecognised URL type."}
