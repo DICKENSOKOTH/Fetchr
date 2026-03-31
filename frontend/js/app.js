@@ -215,39 +215,66 @@ function setProgress(pct, indeterminate = false) {
 async function startDownload() {
   if (S.downloading) return;
 
-  const url = els.urlInput.value.trim();
-  if (!url) { els.urlInput.focus(); return; }
-  if (!url.startsWith('http://') && !url.startsWith('https://')) {
-    setStatus('error', 'Invalid URL', 'Must start with http:// or https://');
-    return;
+  const raw = els.urlInput.value.trim();
+  if (!raw) { els.urlInput.focus(); return; }
+
+  // Split by comma, validate each
+  const urls = raw.split(',').map(u => u.trim()).filter(Boolean);
+  for (const url of urls) {
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      setStatus('error', 'Invalid URL', `Not a valid URL: ${url}`);
+      return;
+    }
   }
 
   if (S.socket) { S.socket.close(); S.socket = null; }
 
   S.downloading            = true;
   els.downloadBtn.disabled = true;
-  setStatus('loading', 'Starting...', url);
+
+  const label = urls.length > 1 ? `${urls.length} downloads queued` : urls[0];
+  setStatus('loading', 'Starting...', label);
   setProgress(0, true);
 
-  const payload = { url, mode: S.mode, quality: S.quality, audio_fmt: S.audioFmt };
-  console.log('[Fetchr] Sending:', payload);
+  const payload = {
+    url:       raw,   // send raw — backend splits it
+    mode:      S.mode,
+    quality:   S.quality,
+    audio_fmt: S.audioFmt,
+  };
 
   try {
     const res = await fetch('/download', {
-      method: 'POST',
+      method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body:    JSON.stringify(payload),
     });
 
-    if (res.status === 429) throw new Error('Rate limit reached. Please wait.');
+    if (res.status === 429) throw new Error('Rate limit reached.');
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || `Server error ${res.status}`);
     }
 
-    const { job_id } = await res.json();
-    const qId = addToQueue(url);
-    connectWS(job_id, url, qId);
+    const data = await res.json();
+    const jobIds = data.job_ids;
+
+    // One queue card and WebSocket per job
+    jobIds.forEach((jobId, i) => {
+      const qId = addToQueue(urls[i] || jobId);
+      // Stagger connections slightly so we don't hammer the server
+      setTimeout(() => connectWS(jobId, urls[i] || jobId, qId), i * 200);
+    });
+
+    // Status panel tracks the last job — earlier ones visible in queue
+    if (jobIds.length === 1) {
+      // single download — status panel follows it normally
+    } else {
+      setStatus('loading', `Downloading ${jobIds.length} items`, 'See queue for individual progress');
+      // Re-enable button immediately for batch — user can add more
+      S.downloading            = false;
+      els.downloadBtn.disabled = false;
+    }
 
   } catch (err) {
     setStatus('error', 'Failed', err.message);

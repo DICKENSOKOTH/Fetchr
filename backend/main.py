@@ -86,35 +86,40 @@ async def start_download(req: DownloadRequest, request: Request):
     if not check_rate_limit(ip):
         raise HTTPException(status_code=429, detail="Rate limit reached. Try again later.")
 
-    url = req.url.strip()
-    if not url.startswith(("http://", "https://")):
-        raise HTTPException(status_code=400, detail="Invalid URL.")
+    # Split by comma, strip whitespace, drop empty entries
+    urls = [u.strip() for u in req.url.split(",") if u.strip()]
 
-    # Validate mode / quality / audio_fmt
-    valid_modes      = {"video", "audio"}
-    valid_qualities  = {"best", "4k", "1440p", "1080p", "720p"}
-    valid_audio_fmts = {"mp3", "flac", "wav", "opus", "aac", "alac"}
+    if not urls:
+        raise HTTPException(status_code=400, detail="No valid URLs provided.")
 
-    mode      = req.mode      if req.mode      in valid_modes      else "video"
-    quality   = req.quality   if req.quality   in valid_qualities  else "best"
-    audio_fmt = req.audio_fmt if req.audio_fmt in valid_audio_fmts else "mp3"
+    for url in urls:
+        if not url.startswith(("http://", "https://")):
+            raise HTTPException(status_code=400, detail=f"Invalid URL: {url}")
 
-    job_id = str(uuid.uuid4())
-    jobs[job_id] = {
-        "status":     "queued",
-        "title":      url,
-        "percent":    0,
-        "message":    "Queued",
-        "created_at": time.time(),
-        "url":        url,
-        "mode":       mode,
-    }
+    mode      = req.mode      if req.mode      in {"video","audio"}                          else "video"
+    quality   = req.quality   if req.quality   in {"best","4k","1440p","1080p","720p"}       else "best"
+    audio_fmt = req.audio_fmt if req.audio_fmt in {"mp3","flac","wav","opus","aac","alac"}   else "mp3"
 
-    asyncio.get_event_loop().run_in_executor(
-        executor, _run_download, job_id, url, mode, quality, audio_fmt
-    )
+    job_ids = []
+    for url in urls:
+        job_id = str(uuid.uuid4())
+        jobs[job_id] = {
+            "status":     "queued",
+            "title":      url,
+            "percent":    0,
+            "message":    "Queued",
+            "created_at": time.time(),
+            "url":        url,
+            "mode":       mode,
+        }
+        asyncio.get_event_loop().run_in_executor(
+            executor, _run_download, job_id, url, mode, quality, audio_fmt
+        )
+        job_ids.append(job_id)
+
     clean_old_jobs()
-    return {"job_id": job_id}
+    # Return all job IDs — frontend handles each one independently
+    return {"job_ids": job_ids, "count": len(job_ids)}
 
 
 def _run_download(job_id: str, url: str, mode: str, quality: str, audio_fmt: str):
