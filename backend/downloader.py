@@ -38,7 +38,7 @@ VIDEO_DOMAINS = [
 ]
 VIDEO_PATH_HINTS = [".m3u8",".m3u","/stream","/watch","/video","/play"]
 
-YOUTUBE_CLIENTS  = ["andriod","ios","tv_embedded","web_creator","web","embed","internal","mweb","music_video_app"]
+YOUTUBE_CLIENTS  = ["android","ios","tv_embedded","web_creator","web","embed","internal","mweb","music_video_app"]
 TIKTOK_API_HOSTS = [
     "api22-normal-c-useast2a.tiktokv.com",
     "api19-normal-c-useast1a.tiktokv.com",
@@ -169,6 +169,7 @@ def _base_opts(progress_hook: Optional[Callable]) -> dict:
     # Only use cookies file if it exists — works without it on trusted networks
     if os.path.exists(COOKIES):
         opts["cookiefile"] = COOKIES
+        opts["cookiesfrombrowser"] = None  # make sure browser extraction is disabled
     if PROXY:
         opts["proxy"] = PROXY
     if progress_hook:
