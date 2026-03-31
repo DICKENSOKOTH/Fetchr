@@ -151,6 +151,7 @@ def resolve_folder(url: str, base_opts: dict) -> str:
     
 # ── yt-dlp options builders ────────────────────────────────────────────────────
 def _base_opts(progress_hook: Optional[Callable]) -> dict:
+    COOKIES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
     opts = {
         "noplaylist":                 False,
         "ignoreerrors":               True,
@@ -165,6 +166,9 @@ def _base_opts(progress_hook: Optional[Callable]) -> dict:
         },
         "file_access_retries": 5,
     }
+    # Only use cookies file if it exists — works without it on trusted networks
+    if os.path.exists(COOKIES):
+        opts["cookiefile"] = COOKIES
     if PROXY:
         opts["proxy"] = PROXY
     if progress_hook:
