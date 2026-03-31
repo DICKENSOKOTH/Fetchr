@@ -43,7 +43,7 @@ VIDEO_DOMAINS = [
 VIDEO_PATH_HINTS = [".m3u8", ".m3u", "/stream", "/watch", "/video", "/play"]
 
 # YouTube player clients — android/ios bypass bot detection on server IPs
-YOUTUBE_CLIENTS = ["android", "ios", "tv_embedded", "web_creator"]
+YOUTUBE_CLIENTS = ["android", "ios", "tv_embedded", "web_creator", "web", "embed", "mweb", "ytdl-raw", "ytmusic"]  # order matters for fallback
 
 # TikTok API hostnames — rotating reduces "Unable to extract" errors
 TIKTOK_API_HOSTS = [
