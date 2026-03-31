@@ -136,12 +136,14 @@ def build_video_opts(
     container = "mkv" if quality in ("4k", "1440p") else "mp4"
 
     opts = {
-        "outtmpl":             f"{DOWNLOAD_DIR}/%(title).100s.%(ext)s",
-        "format":              fmt,
-        "merge_output_format": container,   # used when merging separate streams
-        "remux_video":         container,   # forces container even on pre-merged files
-        "noplaylist":          True,
-        "quiet":               True,
+        "outtmpl":                    f"{DOWNLOAD_DIR}/%(playlist_index)s - %(title).100s.%(ext)s",
+        "format":                     fmt,
+        "merge_output_format":        container,
+        "remux_video":                container,
+        "noplaylist":                 False,      # allow playlists/albums
+        "ignoreerrors":               True,       # skip failed/restricted videos, continue rest
+        "skip_unavailable_fragments": True,       # skip broken stream fragments
+        "quiet":                      True,
     }
     if extra_extractor_args:
         opts["extractor_args"] = extra_extractor_args
@@ -158,19 +160,20 @@ def build_audio_opts(
     extra_extractor_args: Optional[dict] = None,
 ) -> dict:
     codec, quality, _ = AUDIO_FORMAT_MAP.get(fmt, AUDIO_FORMAT_MAP["mp3"])
+
     opts = {
-        "outtmpl":    f"{DOWNLOAD_DIR}/%(title).100s.%(ext)s",
-        # bestaudio ensures we get the highest quality audio stream available
-        "format":     "bestaudio/best",
-        "noplaylist": True,
-        "quiet":      True,
+        "outtmpl":                    f"{DOWNLOAD_DIR}/%(playlist_index)s - %(title).100s.%(ext)s",
+        "format":                     "bestaudio/best",
+        "noplaylist":                 False,      # allow albums
+        "ignoreerrors":               True,       # skip age-restricted or unavailable tracks
+        "skip_unavailable_fragments": True,
+        "quiet":                      True,
         "postprocessors": [
             {
                 "key":              "FFmpegExtractAudio",
                 "preferredcodec":   codec,
                 "preferredquality": quality,
             },
-            # Embed metadata and thumbnail where the format supports it
             {"key": "FFmpegMetadata"},
         ],
     }
