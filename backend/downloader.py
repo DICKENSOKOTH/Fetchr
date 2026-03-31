@@ -38,7 +38,7 @@ VIDEO_DOMAINS = [
 ]
 VIDEO_PATH_HINTS = [".m3u8",".m3u","/stream","/watch","/video","/play"]
 
-YOUTUBE_CLIENTS  = ["android","ios","tv_embedded","web_creator","web","embed","internal","mweb","music_video_app"]
+YOUTUBE_CLIENTS  = ["web","ios","android","tv_embedded","web_creator","web","embed","internal","mweb","music_video_app"]
 TIKTOK_API_HOSTS = [
     "api22-normal-c-useast2a.tiktokv.com",
     "api19-normal-c-useast1a.tiktokv.com",
@@ -152,6 +152,7 @@ def resolve_folder(url: str, base_opts: dict) -> str:
 # ── yt-dlp options builders ────────────────────────────────────────────────────
 def _base_opts(progress_hook: Optional[Callable]) -> dict:
     COOKIES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
+
     opts = {
         "noplaylist":                 False,
         "ignoreerrors":               True,
@@ -160,22 +161,21 @@ def _base_opts(progress_hook: Optional[Callable]) -> dict:
         "socket_timeout":             30,
         "retries":                    10,
         "fragment_retries":           10,
-        "retry_sleep_functions":      {
+        "retry_sleep_functions": {
             "http":     lambda n: 2 ** n,
             "fragment": lambda n: 2 ** n,
         },
-        "file_access_retries": 5,
+        "file_access_retries":  5,
+        "js_runtimes":          {"node": {}},       # correct dict format
+        "remote_components":    {"ejs": "github"},   # downloads challenge solver
     }
-    # Only use cookies file if it exists — works without it on trusted networks
     if os.path.exists(COOKIES):
         opts["cookiefile"] = COOKIES
-        opts["cookiesfrombrowser"] = None  # make sure browser extraction is disabled
     if PROXY:
         opts["proxy"] = PROXY
     if progress_hook:
         opts["progress_hooks"] = [progress_hook]
     return opts
-
 
 def build_video_opts(
     quality: str,
@@ -251,23 +251,21 @@ def _playlist_result(info: dict, mode: str) -> dict:
 
 
 # ── Platform downloaders ───────────────────────────────────────────────────────
-def download_youtube(
-    url: str, mode: str, quality_or_fmt: str,
-    progress_hook: Optional[Callable] = None,
-) -> dict:
+def download_youtube(url, mode, quality_or_fmt, progress_hook=None):
     last_error = "Unknown error"
     for client in YOUTUBE_CLIENTS:
         try:
-            ea = {"youtube": {"player_client": [client]}}
-
-            # Resolve clean folder name first
-            probe = build_video_opts(quality_or_fmt, None, ea)
+            ea = {
+                "youtube": {
+                    "player_client": [client],
+                    "js_runtimes":   ["nodejs"],
+                }
+            }
+            probe  = build_video_opts(quality_or_fmt, None, ea)
             folder = resolve_folder(url, probe)
-
-            opts = (build_audio_opts(quality_or_fmt, progress_hook, ea, folder)
-                    if mode == "audio" else
-                    build_video_opts(quality_or_fmt, progress_hook, ea, folder))
-
+            opts   = (build_audio_opts(quality_or_fmt, progress_hook, ea, folder)
+                      if mode == "audio" else
+                      build_video_opts(quality_or_fmt, progress_hook, ea, folder))
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 return _playlist_result(info, mode)
@@ -278,22 +276,19 @@ def download_youtube(
     raise Exception(last_error)
 
 
-def download_tiktok(
-    url: str, mode: str, quality_or_fmt: str,
-    progress_hook: Optional[Callable] = None,
-) -> dict:
+def download_tiktok(url, mode, quality_or_fmt, progress_hook=None):
     last_error = "Unknown error"
     for api_host in TIKTOK_API_HOSTS:
         try:
-            ea = {"tiktok": {"api_hostname": [api_host]}}
-
+            ea = {
+                "tiktok": {"api_hostname": [api_host]},
+                "youtube": {"js_runtimes": ["nodejs"]},
+            }
             probe  = build_video_opts(quality_or_fmt, None, ea)
             folder = resolve_folder(url, probe)
-
-            opts = (build_audio_opts(quality_or_fmt, progress_hook, ea, folder)
-                    if mode == "audio" else
-                    build_video_opts(quality_or_fmt, progress_hook, ea, folder))
-
+            opts   = (build_audio_opts(quality_or_fmt, progress_hook, ea, folder)
+                      if mode == "audio" else
+                      build_video_opts(quality_or_fmt, progress_hook, ea, folder))
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 return _playlist_result(info, mode)
@@ -307,21 +302,16 @@ def download_tiktok(
     raise Exception(last_error)
 
 
-def download_generic_video(
-    url: str, mode: str, quality_or_fmt: str,
-    progress_hook: Optional[Callable] = None,
-) -> dict:
-    probe  = build_video_opts(quality_or_fmt, None)
+def download_generic_video(url, mode, quality_or_fmt, progress_hook=None):
+    ea = {"youtube": {"js_runtimes": ["nodejs"]}}
+    probe  = build_video_opts(quality_or_fmt, None, ea)
     folder = resolve_folder(url, probe)
-
-    opts = (build_audio_opts(quality_or_fmt, progress_hook, None, folder)
-            if mode == "audio" else
-            build_video_opts(quality_or_fmt, progress_hook, None, folder))
-
+    opts   = (build_audio_opts(quality_or_fmt, progress_hook, ea, folder)
+              if mode == "audio" else
+              build_video_opts(quality_or_fmt, progress_hook, ea, folder))
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=True)
         return _playlist_result(info, mode)
-
 
 # ── Direct file download ───────────────────────────────────────────────────────
 def _get_filename(r: requests.Response, url: str) -> str:
