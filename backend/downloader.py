@@ -38,7 +38,7 @@ VIDEO_DOMAINS = [
 ]
 VIDEO_PATH_HINTS = [".m3u8",".m3u","/stream","/watch","/video","/play"]
 
-YOUTUBE_CLIENTS  = ["android","ios","tv_embedded","web_creator","web","embed","internal","mweb","music_video_app"]
+YOUTUBE_CLIENTS  = ["andriod","ios","tv_embedded","web_creator","web","embed","internal","mweb","music_video_app"]
 TIKTOK_API_HOSTS = [
     "api22-normal-c-useast2a.tiktokv.com",
     "api19-normal-c-useast1a.tiktokv.com",
@@ -111,10 +111,12 @@ def resolve_folder(url: str, base_opts: dict) -> str:
     try:
         opts = {
             **base_opts,
-            "quiet":       True,
-            "noplaylist":  False,
-            # Don't use extract_flat — it skips uploader/channel metadata
-            "playlistend": 1,   # only fetch metadata for first entry, fast enough
+            "quiet":          True,
+            "noplaylist":     False,
+            "playlistend":    1,
+            "socket_timeout": 10,   # short timeout — this is just a metadata probe
+            "retries":        2,
+            "extractor_args": {"youtube": {"player_client": ["tv_embedded"]}},
         }
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -128,14 +130,25 @@ def resolve_folder(url: str, base_opts: dict) -> str:
             ""
         )
 
-        # If artist appears inside title already (some platforms do this), don't duplicate
+        if not artist and info.get("entries"):
+            first = info["entries"][0]
+            if first:
+                artist = (
+                    first.get("artist") or
+                    first.get("uploader") or
+                    first.get("channel") or
+                    first.get("creator") or
+                    ""
+                )
+
+        artist = re.sub(r'\s*-\s*Topic$', '', artist, flags=re.IGNORECASE).strip()
         title  = clean_folder_name(title)
-        folder = f"{title} by {artist}" if artist and artist.lower() not in title.lower() else title
+        folder = f"{title} - {artist}" if artist and artist.lower() not in title.lower() else title
         return safe_folder(folder)
     except Exception:
+        # Never let folder resolution block or fail the actual download
         return "Unknown"
-
-
+    
 # ── yt-dlp options builders ────────────────────────────────────────────────────
 def _base_opts(progress_hook: Optional[Callable]) -> dict:
     opts = {

@@ -191,8 +191,14 @@ async def job_ws(websocket: WebSocket, job_id: str):
             await asyncio.sleep(0.5)
     except WebSocketDisconnect:
         pass
+    except RuntimeError:
+        # Connection already closed by client — ignore
+        pass
     finally:
-        await websocket.close()
+        try:
+            await websocket.close()
+        except Exception:
+            pass  # Already closed — fine
 
 
 @app.get("/")
