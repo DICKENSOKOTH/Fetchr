@@ -403,7 +403,7 @@ async function loadFiles() {
 }
 
 function fileType(ext) {
-  if (['mp4','mkv','webm','avi','mov','flv','wmv'].includes(ext))               return 'video';
+  if (['mp4','mkv','webm','avi','mov','flv','wmv',].includes(ext))               return 'video';
   if (['mp3','flac','wav','opus','aac','m4a','ogg','alac'].includes(ext))       return 'audio';
   if (['jpg','jpeg','png','gif','webp','svg','bmp'].includes(ext))              return 'image';
   if (['pdf','docx','xlsx','pptx','txt','html','zip','rar','epub'].includes(ext)) return 'doc';

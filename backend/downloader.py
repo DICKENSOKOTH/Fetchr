@@ -32,12 +32,12 @@ DIRECT_EXTS = {
 }
 
 VIDEO_DOMAINS = [
-    "youtube.com", "youtu.be", "vimeo.com", "twitch.tv",
-    "tiktok.com", "vm.tiktok.com", "vt.tiktok.com",
-    "dailymotion.com", "twitter.com", "x.com", 
-    "spotify.com", "soundcloud.com", "bandcamp.com",
+    "youtube.com", "youtu.be", "vimeo.com", "twitch.tv", "stremio.com",
+    "tiktok.com", "vm.tiktok.com", "vt.tiktok.com", "netflix.com",
+    "dailymotion.com", "twitter.com", "x.com", "yotubemusic.com",
+    "spotify.com", "soundcloud.com", "bandcamp.com", "redflix.com",
     "mixcloud.com","deezer.com", "music.apple.com", "music.youtube.com",
-    "instagram.com", "facebook.com", "reddit.com",
+    "instagram.com", "facebook.com", "reddit.com", "linkedin.com",
     "streamable.com", "rumble.com", "odysee.com", "bitchute.com",
 ]
 VIDEO_PATH_HINTS = [".m3u8", ".m3u", "/stream", "/watch", "/video", "/play"]
