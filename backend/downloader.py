@@ -136,7 +136,7 @@ def build_video_opts(
     container = "mkv" if quality in ("4k", "1440p") else "mp4"
 
     opts = {
-        "outtmpl":                    f"{DOWNLOAD_DIR}/%(playlist_title|%(uploader)s|Unknown Album)s/%(playlist_index)s - %(title).100s.%(ext)s",
+        "outtmpl":                    f"{DOWNLOAD_DIR}/%(playlist_title,playlist,title)s by %(channel,uploader,artist,Unknown Artist)s/%(playlist_index)s - %(title).100s.%(ext)s",
         "format":                     fmt,
         "merge_output_format":        container,
         "remux_video":                container,
@@ -172,7 +172,7 @@ def build_audio_opts(
     codec, quality, _ = AUDIO_FORMAT_MAP.get(fmt, AUDIO_FORMAT_MAP["mp3"])
 
     opts = {
-        "outtmpl":                    f"{DOWNLOAD_DIR}/%(playlist_title,uploader,Unknown Album)s/%(playlist_index)s - %(title).100s.%(ext)s",
+        "outtmpl":                    f"{DOWNLOAD_DIR}/%(playlist_title,playlist,title)s by %(channel,uploader,artist,Unknown Artist)s/%(playlist_index)s - %(title).100s.%(ext)s",
         "format":                     "bestaudio/best",
         "noplaylist":                 False,
         "ignoreerrors":               True,
