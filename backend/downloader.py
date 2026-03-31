@@ -136,14 +136,24 @@ def build_video_opts(
     container = "mkv" if quality in ("4k", "1440p") else "mp4"
 
     opts = {
-        "outtmpl":                    f"{DOWNLOAD_DIR}/%(playlist_index)s - %(title).100s.%(ext)s",
+        "outtmpl":                    f"{DOWNLOAD_DIR}/%(playlist_title|%(uploader)s|Unknown Album)s/%(playlist_index)s - %(title).100s.%(ext)s",
         "format":                     fmt,
         "merge_output_format":        container,
         "remux_video":                container,
-        "noplaylist":                 False,      # allow playlists/albums
-        "ignoreerrors":               True,       # skip failed/restricted videos, continue rest
-        "skip_unavailable_fragments": True,       # skip broken stream fragments
+        "noplaylist":                 False,
+        "ignoreerrors":               True,
+        "skip_unavailable_fragments": True,
         "quiet":                      True,
+
+        # Timeout + retry settings
+        "socket_timeout":    30,       # seconds before a single socket op times out
+        "retries":           10,       # retry each fragment/file up to 10 times
+        "fragment_retries":  10,       # retry broken stream fragments 10 times
+        "retry_sleep_functions": {
+            "http":     lambda n: 2 ** n,   # exponential backoff: 1s, 2s, 4s, 8s...
+            "fragment": lambda n: 2 ** n,
+        },
+        "file_access_retries": 5,
     }
     if extra_extractor_args:
         opts["extractor_args"] = extra_extractor_args
@@ -162,12 +172,23 @@ def build_audio_opts(
     codec, quality, _ = AUDIO_FORMAT_MAP.get(fmt, AUDIO_FORMAT_MAP["mp3"])
 
     opts = {
-        "outtmpl":                    f"{DOWNLOAD_DIR}/%(playlist_index)s - %(title).100s.%(ext)s",
+        "outtmpl":                    f"{DOWNLOAD_DIR}/%(playlist_title|%(uploader)s|Unknown Album)s/%(playlist_index)s - %(title).100s.%(ext)s",
         "format":                     "bestaudio/best",
-        "noplaylist":                 False,      # allow albums
-        "ignoreerrors":               True,       # skip age-restricted or unavailable tracks
+        "noplaylist":                 False,
+        "ignoreerrors":               True,
         "skip_unavailable_fragments": True,
         "quiet":                      True,
+
+        # Timeout + retry settings
+        "socket_timeout":    30,
+        "retries":           10,
+        "fragment_retries":  10,
+        "retry_sleep_functions": {
+            "http":     lambda n: 2 ** n,
+            "fragment": lambda n: 2 ** n,
+        },
+        "file_access_retries": 5,
+
         "postprocessors": [
             {
                 "key":              "FFmpegExtractAudio",
@@ -193,27 +214,51 @@ def _ydl_run(opts: dict) -> dict:
         info = ydl.extract_info(ydl._ydl_info if hasattr(ydl, "_ydl_info") else None, download=False)
 
 
+def _extract_playlist_result(info: dict, url: str) -> dict:
+    """
+    Inspects the yt-dlp info dict after a playlist download.
+    Returns an honest result — partial if some entries failed.
+    """
+    # Single video — no playlist info
+    if not info.get("entries"):
+        return {"status": "done", "type": "video", "title": info.get("title", "video")}
+
+    entries     = list(info["entries"])
+    total       = len(entries)
+    # yt-dlp sets entry to None when a video was skipped/failed
+    succeeded   = sum(1 for e in entries if e is not None)
+    failed      = total - succeeded
+    title       = info.get("title") or info.get("playlist_title") or "Playlist"
+
+    if succeeded == 0:
+        return {"status": "error", "message": f"All {total} items failed to download."}
+
+    if failed > 0:
+        return {
+            "status":  "done",
+            "type":    "video",
+            "title":   title,
+            "message": f"Downloaded {succeeded}/{total} — {failed} skipped (unavailable or age-restricted)",
+        }
+
+    return {"status": "done", "type": "video", "title": title}
+
+
 def download_youtube(
-    url: str,
-    mode: str,
-    quality_or_fmt: str,
+    url: str, mode: str, quality_or_fmt: str,
     progress_hook: Optional[Callable] = None,
 ) -> dict:
     last_error = "Unknown error"
     for client in YOUTUBE_CLIENTS:
         try:
-            ea = {"youtube": {"player_client": [client]}}
-            if mode == "audio":
-                opts = build_audio_opts(quality_or_fmt, progress_hook, ea)
-            else:
-                opts = build_video_opts(quality_or_fmt, progress_hook, ea)
+            ea   = {"youtube": {"player_client": [client]}}
+            opts = build_audio_opts(quality_or_fmt, progress_hook, ea) if mode == "audio" \
+                   else build_video_opts(quality_or_fmt, progress_hook, ea)
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=True)
-                return {
-                    "status": "done",
-                    "type":   mode,
-                    "title":  info.get("title", "video"),
-                }
+                result = _extract_playlist_result(info, url)
+                result["type"] = mode
+                return result
         except Exception as e:
             last_error = str(e)
             if "Unsupported URL" in last_error:
@@ -222,54 +267,38 @@ def download_youtube(
 
 
 def download_tiktok(
-    url: str,
-    mode: str,
-    quality_or_fmt: str,
+    url: str, mode: str, quality_or_fmt: str,
     progress_hook: Optional[Callable] = None,
 ) -> dict:
     last_error = "Unknown error"
     for api_host in TIKTOK_API_HOSTS:
         try:
-            ea = {"tiktok": {"api_hostname": [api_host]}}
-            if mode == "audio":
-                opts = build_audio_opts(quality_or_fmt, progress_hook, ea)
-            else:
-                opts = build_video_opts(quality_or_fmt, progress_hook, ea)
+            ea   = {"tiktok": {"api_hostname": [api_host]}}
+            opts = build_audio_opts(quality_or_fmt, progress_hook, ea) if mode == "audio" \
+                   else build_video_opts(quality_or_fmt, progress_hook, ea)
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=True)
-                return {
-                    "status": "done",
-                    "type":   mode,
-                    "title":  info.get("title", "video"),
-                }
+                result = _extract_playlist_result(info, url)
+                result["type"] = mode
+                return result
         except Exception as e:
             last_error = str(e)
-            if any(x in last_error for x in [
-                "Unsupported URL", "account is private",
-                "This video is unavailable", "does not exist",
-            ]):
+            if any(x in last_error for x in ["Unsupported URL", "account is private", "does not exist"]):
                 break
     raise Exception(last_error)
 
 
 def download_generic_video(
-    url: str,
-    mode: str,
-    quality_or_fmt: str,
+    url: str, mode: str, quality_or_fmt: str,
     progress_hook: Optional[Callable] = None,
 ) -> dict:
-    if mode == "audio":
-        opts = build_audio_opts(quality_or_fmt, progress_hook)
-    else:
-        opts = build_video_opts(quality_or_fmt, progress_hook)
+    opts = build_audio_opts(quality_or_fmt, progress_hook) if mode == "audio" \
+           else build_video_opts(quality_or_fmt, progress_hook)
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=True)
-        return {
-            "status": "done",
-            "type":   mode,
-            "title":  info.get("title", "video"),
-        }
-
+        result = _extract_playlist_result(info, url)
+        result["type"] = mode
+        return result
 
 # ── Direct file download ───────────────────────────────────────────────────────
 def download_file(url: str, progress_hook: Optional[Callable] = None) -> dict:
