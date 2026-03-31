@@ -1,62 +1,62 @@
 /* Fetchr — app.js */
 
 const WS_PROTO = location.protocol === 'https:' ? 'wss' : 'ws';
-const WS_BASE  = `${WS_PROTO}://${location.host}`;
+const WS_BASE = `${WS_PROTO}://${location.host}`;
 
 // ── State ──────────────────────────────────────────────────────────────────────
 const S = {
-  history:       JSON.parse(localStorage.getItem('fetchr_history') || '[]'),
-  allFiles:      [],
-  socket:        null,
-  downloading:   false,
-  mode:          'video',   // sent to backend
-  quality:       '1080p',   // sent to backend
-  audioFmt:      'mp3',     // sent to backend
+  history: JSON.parse(localStorage.getItem('fetchr_history') || '[]'),
+  allFiles: [],
+  socket: null,
+  downloading: false,
+  mode: 'video',   // sent to backend
+  quality: '1080p',   // sent to backend
+  audioFmt: 'mp3',     // sent to backend
 };
 
 // ── Shorthand ──────────────────────────────────────────────────────────────────
-const el  = (id) => document.getElementById(id);
+const el = (id) => document.getElementById(id);
 const els = {
-  urlInput:        el('urlInput'),
-  clearBtn:        el('clearBtn'),
-  downloadBtn:     el('downloadBtn'),
-  statusPanel:     el('statusPanel'),
-  statusIconWrap:  el('statusIconWrap'),
-  statusTitle:     el('statusTitle'),
-  statusDetail:    el('statusDetail'),
-  progressWrap:    el('progressWrap'),
-  progressBar:     el('progressBar'),
-  progressPct:     el('progressPct'),
-  recentList:      el('recentList'),
+  urlInput: el('urlInput'),
+  clearBtn: el('clearBtn'),
+  downloadBtn: el('downloadBtn'),
+  statusPanel: el('statusPanel'),
+  statusIconWrap: el('statusIconWrap'),
+  statusTitle: el('statusTitle'),
+  statusDetail: el('statusDetail'),
+  progressWrap: el('progressWrap'),
+  progressBar: el('progressBar'),
+  progressPct: el('progressPct'),
+  recentList: el('recentList'),
   clearHistoryBtn: el('clearHistoryBtn'),
-  queueList:       el('queueList'),
-  filesTableBody:  el('filesTableBody'),
-  folderPath:      el('folderPath'),
-  fileSearch:      el('fileSearch'),
-  fileCount:       el('fileCount'),
-  refreshBtn:      el('refreshBtn'),
-  serverDot:       el('serverDot'),
-  serverLabel:     el('serverLabel'),
-  blockVideo:      el('blockVideo'),
-  blockAudio:      el('blockAudio'),
-  summaryText:     el('summaryText'),
+  queueList: el('queueList'),
+  filesTableBody: el('filesTableBody'),
+  folderPath: el('folderPath'),
+  fileSearch: el('fileSearch'),
+  fileCount: el('fileCount'),
+  refreshBtn: el('refreshBtn'),
+  serverDot: el('serverDot'),
+  serverLabel: el('serverLabel'),
+  blockVideo: el('blockVideo'),
+  blockAudio: el('blockAudio'),
+  summaryText: el('summaryText'),
 };
 
 // ── SVG icons ──────────────────────────────────────────────────────────────────
 const ICONS = {
-  idle:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>`,
+  idle: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>`,
   loading: `<svg class="spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>`,
-  done:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`,
-  error:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>`,
-  video:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="15" height="10" rx="2"/><path d="m17 9 5-2v10l-5-2V9z"/></svg>`,
-  audio:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`,
-  file:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`,
+  done: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`,
+  error: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>`,
+  video: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="15" height="10" rx="2"/><path d="m17 9 5-2v10l-5-2V9z"/></svg>`,
+  audio: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`,
+  file: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`,
 };
 
 // Summary labels
-const V_LABEL = { best:'Best available', '4k':'4K', '1440p':'1440p', '1080p':'1080p HD', '720p':'720p HD' };
-const V_CONT  = { best:'MP4', '4k':'MKV', '1440p':'MKV', '1080p':'MP4', '720p':'MP4' };
-const A_LABEL = { mp3:'MP3 · 320kbps', flac:'FLAC · Lossless', wav:'WAV · Lossless', opus:'Opus · HQ', aac:'AAC · HQ', alac:'ALAC · Apple Lossless' };
+const V_LABEL = { best: 'Best available', '4k': '4K', '1440p': '1440p', '1080p': '1080p HD', '720p': '720p HD' };
+const V_CONT = { best: 'MP4', '4k': 'MKV', '1440p': 'MKV', '1080p': 'MP4', '720p': 'MP4' };
+const A_LABEL = { mp3: 'MP3 · 320kbps', flac: 'FLAC · Lossless', wav: 'WAV · Lossless', opus: 'Opus · HQ', aac: 'AAC · HQ', alac: 'ALAC · Apple Lossless' };
 
 
 // ── Navigation ─────────────────────────────────────────────────────────────────
@@ -99,7 +99,7 @@ function setVideoQuality(val) {
   S.quality = val;
 
   // Clear all video quality pills then activate the right one
-  ['best','4k','1440p','1080p','720p'].forEach((v) => {
+  ['best', '4k', '1440p', '1080p', '720p'].forEach((v) => {
     el(`q-${v}`)?.classList.toggle('active', v === val);
   });
 
@@ -110,7 +110,7 @@ function setAudioFmt(fmt) {
   S.audioFmt = fmt;
 
   // Clear all audio format pills then activate the right one
-  ['mp3','flac','wav','opus','aac','alac'].forEach((f) => {
+  ['mp3', 'flac', 'wav', 'opus', 'aac', 'alac'].forEach((f) => {
     el(`a-${f}`)?.classList.toggle('active', f === fmt);
   });
 
@@ -132,18 +132,18 @@ function initFormatSelector() {
   el('modeAudio').onclick = () => setMode('audio');
 
   // Video quality pills — direct onclick per button
-  el('q-best').onclick  = () => setVideoQuality('best');
-  el('q-4k').onclick    = () => setVideoQuality('4k');
+  el('q-best').onclick = () => setVideoQuality('best');
+  el('q-4k').onclick = () => setVideoQuality('4k');
   el('q-1440p').onclick = () => setVideoQuality('1440p');
   el('q-1080p').onclick = () => setVideoQuality('1080p');
-  el('q-720p').onclick  = () => setVideoQuality('720p');
+  el('q-720p').onclick = () => setVideoQuality('720p');
 
   // Audio format pills — direct onclick per button
-  el('a-mp3').onclick  = () => setAudioFmt('mp3');
+  el('a-mp3').onclick = () => setAudioFmt('mp3');
   el('a-flac').onclick = () => setAudioFmt('flac');
-  el('a-wav').onclick  = () => setAudioFmt('wav');
+  el('a-wav').onclick = () => setAudioFmt('wav');
   el('a-opus').onclick = () => setAudioFmt('opus');
-  el('a-aac').onclick  = () => setAudioFmt('aac');
+  el('a-aac').onclick = () => setAudioFmt('aac');
   el('a-alac').onclick = () => setAudioFmt('alac');
 
   // Render initial state
@@ -156,12 +156,12 @@ async function checkServer() {
   try {
     const r = await fetch('/health', { signal: AbortSignal.timeout(3000) });
     if (r.ok) {
-      els.serverDot.className    = 'status-dot online';
+      els.serverDot.className = 'status-dot online';
       els.serverLabel.textContent = 'Server online';
       return true;
     }
   } catch { /* ignore */ }
-  els.serverDot.className    = 'status-dot offline';
+  els.serverDot.className = 'status-dot offline';
   els.serverLabel.textContent = 'Server offline';
   return false;
 }
@@ -182,30 +182,30 @@ function initUrlInput() {
 
 // ── Status panel ───────────────────────────────────────────────────────────────
 function setStatus(type, title, detail) {
-  els.statusPanel.className    = `status-panel${type !== 'idle' ? ` is-${type}` : ''}`;
+  els.statusPanel.className = `status-panel${type !== 'idle' ? ` is-${type}` : ''}`;
   els.statusIconWrap.innerHTML = ICONS[type] || ICONS.idle;
-  els.statusTitle.textContent  = title;
+  els.statusTitle.textContent = title;
   els.statusDetail.textContent = detail;
 }
 
 function showProgress(show) {
   els.progressWrap.style.display = show ? 'block' : 'none';
   if (!show) {
-    els.progressBar.className        = 'progress-bar';
-    els.progressBar.style.width      = '0%';
+    els.progressBar.className = 'progress-bar';
+    els.progressBar.style.width = '0%';
     els.progressBar.style.background = '';
-    els.progressPct.textContent      = '';
+    els.progressPct.textContent = '';
   }
 }
 
 function setProgress(pct, indeterminate = false) {
   els.progressWrap.style.display = 'block';
   if (indeterminate) {
-    els.progressBar.className   = 'progress-bar indeterminate';
+    els.progressBar.className = 'progress-bar indeterminate';
     els.progressBar.style.width = '';
     els.progressPct.textContent = '';
   } else {
-    els.progressBar.className   = 'progress-bar';
+    els.progressBar.className = 'progress-bar';
     els.progressBar.style.width = `${Math.min(pct, 100)}%`;
     els.progressPct.textContent = `${Math.round(pct)}%`;
   }
@@ -229,7 +229,7 @@ async function startDownload() {
 
   if (S.socket) { S.socket.close(); S.socket = null; }
 
-  S.downloading            = true;
+  S.downloading = true;
   els.downloadBtn.disabled = true;
 
   const label = urls.length > 1 ? `${urls.length} downloads queued` : urls[0];
@@ -237,17 +237,17 @@ async function startDownload() {
   setProgress(0, true);
 
   const payload = {
-    url:       raw,   // send raw — backend splits it
-    mode:      S.mode,
-    quality:   S.quality,
+    url: raw,   // send raw — backend splits it
+    mode: S.mode,
+    quality: S.quality,
     audio_fmt: S.audioFmt,
   };
 
   try {
     const res = await fetch('/download', {
-      method:  'POST',
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(payload),
+      body: JSON.stringify(payload),
     });
 
     if (res.status === 429) throw new Error('Rate limit reached.');
@@ -257,29 +257,29 @@ async function startDownload() {
     }
 
     const data = await res.json();
-    const jobIds = data.job_ids;
+    const jobIds = data.job_ids || (data.job_id ? [data.job_id] : []);
 
-    // One queue card and WebSocket per job
+    if (jobIds.length === 0) {
+      throw new Error('No jobs returned from server');
+    }
+
     jobIds.forEach((jobId, i) => {
       const qId = addToQueue(urls[i] || jobId);
-      // Stagger connections slightly so we don't hammer the server
       setTimeout(() => connectWS(jobId, urls[i] || jobId, qId), i * 200);
     });
 
-    // Status panel tracks the last job — earlier ones visible in queue
     if (jobIds.length === 1) {
-      // single download — status panel follows it normally
+      // single — status panel follows it, button stays disabled until done
     } else {
       setStatus('loading', `Downloading ${jobIds.length} items`, 'See queue for individual progress');
-      // Re-enable button immediately for batch — user can add more
-      S.downloading            = false;
+      S.downloading = false;
       els.downloadBtn.disabled = false;
     }
 
   } catch (err) {
     setStatus('error', 'Failed', err.message);
     showProgress(false);
-    S.downloading            = false;
+    S.downloading = false;
     els.downloadBtn.disabled = false;
     checkServer();
   }
@@ -291,10 +291,10 @@ function connectWS(jobId, url, qId) {
   try { ws = new WebSocket(`${WS_BASE}/ws/${jobId}`); }
   catch { poll(jobId, url, qId); return; }
 
-  S.socket     = ws;
-  ws.onmessage = (e) => { try { onJobUpdate(JSON.parse(e.data), url, qId); } catch {} };
-  ws.onerror   = ()  => { ws.close(); poll(jobId, url, qId); };
-  ws.onclose   = ()  => { S.socket = null; };
+  S.socket = ws;
+  ws.onmessage = (e) => { try { onJobUpdate(JSON.parse(e.data), url, qId); } catch { } };
+  ws.onerror = () => { ws.close(); poll(jobId, url, qId); };
+  ws.onclose = () => { S.socket = null; };
 }
 
 function poll(jobId, url, qId) {
@@ -321,7 +321,7 @@ function onJobUpdate(job, url, qId) {
     setTimeout(() => showProgress(false), 1500);
     addHistory({ url, title: job.title || url, status: 'done', type: job.type || S.mode });
     queueDone(qId, true, job.title);
-    S.downloading            = false;
+    S.downloading = false;
     els.downloadBtn.disabled = false;
 
   } else if (job.status === 'error') {
@@ -331,7 +331,7 @@ function onJobUpdate(job, url, qId) {
     setTimeout(() => showProgress(false), 2000);
     addHistory({ url, title: url, status: 'error', type: 'error' });
     queueDone(qId, false, job.message);
-    S.downloading            = false;
+    S.downloading = false;
     els.downloadBtn.disabled = false;
   }
 }
@@ -351,11 +351,11 @@ function renderHistory() {
     return;
   }
   els.recentList.innerHTML = S.history.slice(0, 8).map((e) => {
-    const isV   = e.type === 'video';
-    const isA   = e.type === 'audio';
+    const isV = e.type === 'video';
+    const isA = e.type === 'audio';
     const isErr = e.status === 'error';
-    const cls   = isV ? 'type-video' : isA ? 'type-audio' : isErr ? 'type-error' : 'type-file';
-    const ico   = isV ? ICONS.video  : isA ? ICONS.audio  : isErr ? ICONS.error  : ICONS.file;
+    const cls = isV ? 'type-video' : isA ? 'type-audio' : isErr ? 'type-error' : 'type-file';
+    const ico = isV ? ICONS.video : isA ? ICONS.audio : isErr ? ICONS.error : ICONS.file;
     const badge = e.status === 'done'
       ? '<span class="recent-item-badge done">Done</span>'
       : '<span class="recent-item-badge error">Failed</span>';
@@ -400,10 +400,10 @@ function queueProgress(id, pct, msg) {
 function queueDone(id, ok, label) {
   const s = el(`qs-${id}`), b = el(`qb-${id}`), m = el(`qm-${id}`);
   if (!s) return;
-  s.textContent      = ok ? 'Done' : 'Failed';
-  s.style.color      = `var(--${ok ? 'green' : 'red'})`;
-  b.className        = 'queue-item-bar';
-  b.style.width      = '100%';
+  s.textContent = ok ? 'Done' : 'Failed';
+  s.style.color = `var(--${ok ? 'green' : 'red'})`;
+  b.className = 'queue-item-bar';
+  b.style.width = '100%';
   b.style.background = `var(--${ok ? 'green' : 'red'})`;
   if (m && label) m.textContent = label;
   setTimeout(() => {
@@ -430,10 +430,10 @@ async function loadFiles() {
 }
 
 function fileType(ext) {
-  if (['mp4','mkv','webm','avi','mov','flv','wmv',].includes(ext))               return 'video';
-  if (['mp3','flac','wav','opus','aac','m4a','ogg','alac'].includes(ext))       return 'audio';
-  if (['jpg','jpeg','png','gif','webp','svg','bmp'].includes(ext))              return 'image';
-  if (['pdf','docx','xlsx','pptx','txt','html','zip','rar','epub'].includes(ext)) return 'doc';
+  if (['mp4', 'mkv', 'webm', 'avi', 'mov', 'flv', 'wmv',].includes(ext)) return 'video';
+  if (['mp3', 'flac', 'wav', 'opus', 'aac', 'm4a', 'ogg', 'alac'].includes(ext)) return 'audio';
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(ext)) return 'image';
+  if (['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'html', 'zip', 'rar', 'epub'].includes(ext)) return 'doc';
   return 'other';
 }
 
@@ -450,7 +450,7 @@ function renderFiles(files) {
 
 // ── Utility ────────────────────────────────────────────────────────────────────
 function esc(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────────
