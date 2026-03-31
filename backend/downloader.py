@@ -172,7 +172,7 @@ def build_audio_opts(
     codec, quality, _ = AUDIO_FORMAT_MAP.get(fmt, AUDIO_FORMAT_MAP["mp3"])
 
     opts = {
-        "outtmpl":                    f"{DOWNLOAD_DIR}/%(playlist_title|%(uploader)s|Unknown Album)s/%(playlist_index)s - %(title).100s.%(ext)s",
+        "outtmpl":                    f"{DOWNLOAD_DIR}/%(playlist_title,uploader,Unknown Album)s/%(playlist_index)s - %(title).100s.%(ext)s",
         "format":                     "bestaudio/best",
         "noplaylist":                 False,
         "ignoreerrors":               True,
