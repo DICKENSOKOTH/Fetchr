@@ -206,7 +206,7 @@ def build_audio_opts(
     f"{DOWNLOAD_DIR}/{folder}/%(title).100s.%(ext)s"   # no index for TikTok flat folder
     if folder else
     f"{DOWNLOAD_DIR}/%(title).100s.%(ext)s"
-)
+  )
     opts = _base_opts(progress_hook)
     opts.update({
         "outtmpl": out,
