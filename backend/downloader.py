@@ -29,12 +29,12 @@ VIDEO_DOMAINS = [
     "youtube.com","youtu.be","vimeo.com","twitch.tv",
     "tiktok.com","vm.tiktok.com","vt.tiktok.com",
     "dailymotion.com","twitter.com","x.com", "redflix.co"
-    "instagram.com","facebook.com","reddit.com",
+    "instagram.com","facebook.com","reddit.com", "music.youtube.com",
     "streamable.com","rumble.com","odysee.com","bitchute.com",
 ]
 VIDEO_PATH_HINTS = [".m3u8",".m3u","/stream","/watch","/video","/play","/embed","/e/","/v/"]
 
-YOUTUBE_CLIENTS  = ["android", "ios", "tv_embedded", "web_creator", "web", "desktop", "mweb", "youtube_music",]
+YOUTUBE_CLIENTS  = ["android", "ios", "tv_embedded", "web_creator", "web", "desktop", "mweb", "youtube_music", "youtube.com"]  # order matters for format selection
 TIKTOK_API_HOSTS = [
     "api22-normal-c-useast2a.tiktokv.com",
     "api19-normal-c-useast1a.tiktokv.com",
