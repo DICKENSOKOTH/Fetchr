@@ -1,5 +1,12 @@
 """
 downloader.py — Fetchr download engine
+This module provides functions to download content from various sources,
+primarily using yt-dlp for video/audio extraction and requests for direct file downloads.
+Key features:
+- Type detection: Classifies URLs as direct files, videos, or unknown probes.
+- yt-dlp integration: Configures yt-dlp with appropriate options for YouTube, TikTok, and generic video sources.
+- Progress hooks: Supports real-time progress updates during downloads.
+- Storage info: Provides details about downloaded files and available disk space.
 """
 
 import yt_dlp
@@ -17,6 +24,10 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 PROXY: Optional[str] = os.environ.get("FETCHR_PROXY", None)
 
+# ── Shared folder names ────────────────────────────────────────────────────────
+TIKTOK_FOLDER          = "TikTok"
+YOUTUBE_SINGLES_FOLDER = "YouTube"
+
 # ── Constants ──────────────────────────────────────────────────────────────────
 DIRECT_EXTS = {
     "pdf","zip","rar","7z","tar","gz","bz2","exe","dmg","apk","msi","deb",
@@ -28,13 +39,17 @@ DIRECT_EXTS = {
 VIDEO_DOMAINS = [
     "youtube.com","youtu.be","vimeo.com","twitch.tv",
     "tiktok.com","vm.tiktok.com","vt.tiktok.com",
-    "dailymotion.com","twitter.com","x.com", "redflix.co"
-    "instagram.com","facebook.com","reddit.com", "music.youtube.com",
+    "dailymotion.com","twitter.com","x.com",
+    "instagram.com","facebook.com","reddit.com",
     "streamable.com","rumble.com","odysee.com","bitchute.com",
 ]
-VIDEO_PATH_HINTS = [".m3u8",".m3u","/stream","/watch","/video","/play","/embed","/e/","/v/"]
+VIDEO_PATH_HINTS = [".m3u8",".m3u","/stream","/watch","/video","/play"]
 
-YOUTUBE_CLIENTS  = ["android", "ios", "tv_embedded", "web_creator", "web", "desktop", "mweb", "youtube_music", "youtube.com"]  # order matters for format selection
+# Clients that work WITHOUT cookies (android/ios require no-cookie session)
+# Clients that work WITH cookies (web-based clients)
+YOUTUBE_CLIENTS_NO_COOKIES  = ["android", "ios", "tv_embedded", "web_creator"]
+YOUTUBE_CLIENTS_WITH_COOKIES = ["web", "web_creator", "web_safari", "mweb"]
+
 TIKTOK_API_HOSTS = [
     "api22-normal-c-useast2a.tiktokv.com",
     "api19-normal-c-useast1a.tiktokv.com",
@@ -58,6 +73,22 @@ AUDIO_FORMAT_MAP = {
     "aac":  ("aac",  "0",   "m4a"),
     "alac": ("alac", "0",   "m4a"),
 }
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
+def _cookies_path() -> str:
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
+
+
+def _has_cookies() -> bool:
+    return os.path.exists(_cookies_path())
+
+
+def _youtube_clients() -> list:
+    """Return the right client list depending on whether cookies.txt exists.
+    android and ios are skipped by yt-dlp when a cookiefile is provided,
+    so we switch to web-based clients in that case."""
+    return YOUTUBE_CLIENTS_WITH_COOKIES if _has_cookies() else YOUTUBE_CLIENTS_NO_COOKIES
 
 
 # ── Type detection ─────────────────────────────────────────────────────────────
@@ -91,7 +122,7 @@ def probe_url(url: str) -> str:
     return "ydlp"
 
 
-# ── Folder helpers ─────────────────────────────────────────────────────────────
+# ── Folder name helpers ────────────────────────────────────────────────────────
 def clean_folder_name(name: str) -> str:
     name = re.sub(r'^(album|playlist|ep|single)\s*[-:]\s*', '', name, flags=re.IGNORECASE)
     return name.strip()
@@ -101,43 +132,28 @@ def safe_folder(name: str) -> str:
     return re.sub(r'[<>:"/\\|?*]', '-', name).strip()
 
 
-def resolve_folder(url: str, base_opts: dict) -> str:
-    try:
-        opts = {
-            **base_opts,
-            "quiet":       True,
-            "noplaylist":  False,
-            "playlistend": 1,
-            "extractor_args": {"youtube": {"player_client": ["tv_embedded"], "js_runtimes": ["nodejs"]}},
-        }
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-
-        title  = info.get("playlist_title") or info.get("playlist") or info.get("title") or "Unknown"
-        artist = (
-            info.get("uploader") or info.get("channel") or
-            info.get("artist")   or info.get("creator") or ""
-        )
-
-        if not artist and info.get("entries"):
-            first = info["entries"][0]
-            if first:
-                artist = (
-                    first.get("artist")   or first.get("uploader") or
-                    first.get("channel")  or first.get("creator")  or ""
-                )
-
-        artist = re.sub(r'\s*-\s*Topic$', '', artist, flags=re.IGNORECASE).strip()
-        title  = clean_folder_name(title)
-        folder = f"{title} - {artist}" if artist and artist.lower() not in title.lower() else title
-        return safe_folder(folder)
-    except Exception:
-        return "Unknown"
+def build_playlist_folder(info: dict) -> str:
+    """Build 'Title - Artist' folder from a yt-dlp info dict."""
+    title  = info.get("playlist_title") or info.get("playlist") or info.get("title") or "Unknown"
+    artist = (
+        info.get("uploader") or info.get("channel") or
+        info.get("artist")   or info.get("creator") or ""
+    )
+    if not artist and info.get("entries"):
+        first = next((e for e in info["entries"] if e), None)
+        if first:
+            artist = (
+                first.get("artist") or first.get("uploader") or
+                first.get("channel") or first.get("creator") or ""
+            )
+    artist = re.sub(r'\s*-\s*Topic$', '', artist, flags=re.IGNORECASE).strip()
+    title  = clean_folder_name(title)
+    folder = f"{title} - {artist}" if artist and artist.lower() not in title.lower() else title
+    return safe_folder(folder)
 
 
 # ── Base yt-dlp options ────────────────────────────────────────────────────────
 def _base_opts(progress_hook: Optional[Callable]) -> dict:
-    COOKIES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
     opts = {
         "noplaylist":                 False,
         "ignoreerrors":               True,
@@ -152,10 +168,10 @@ def _base_opts(progress_hook: Optional[Callable]) -> dict:
         },
         "file_access_retries": 5,
         "js_runtimes":         {"node": {}},
-        "remote_components": {"ejs:github"},
+        "remote_components":   {"ejs:github"},
     }
-    if os.path.exists(COOKIES):
-        opts["cookiefile"] = COOKIES
+    if _has_cookies():
+        opts["cookiefile"] = _cookies_path()
     if PROXY:
         opts["proxy"] = PROXY
     if progress_hook:
@@ -169,14 +185,16 @@ def build_video_opts(
     progress_hook: Optional[Callable],
     extra_extractor_args: Optional[dict] = None,
     folder: Optional[str] = None,
+    single: bool = False,
 ) -> dict:
     fmt       = VIDEO_FORMAT_MAP.get(quality, VIDEO_FORMAT_MAP["best"])
     container = "mkv" if quality in ("4k","1440p") else "mp4"
-    out = (
-        f"{DOWNLOAD_DIR}/{folder}/%(playlist_index)s - %(title).100s.%(ext)s"
-        if folder else
-        f"{DOWNLOAD_DIR}/%(title).100s.%(ext)s"
-    )
+    if folder and not single:
+        out = f"{DOWNLOAD_DIR}/{folder}/%(playlist_index)s - %(title).100s.%(ext)s"
+    elif folder and single:
+        out = f"{DOWNLOAD_DIR}/{folder}/%(title).100s.%(ext)s"
+    else:
+        out = f"{DOWNLOAD_DIR}/%(title).100s.%(ext)s"
     opts = _base_opts(progress_hook)
     opts.update({
         "outtmpl":             out,
@@ -195,18 +213,15 @@ def build_audio_opts(
     progress_hook: Optional[Callable],
     extra_extractor_args: Optional[dict] = None,
     folder: Optional[str] = None,
+    single: bool = False,
 ) -> dict:
     codec, quality, _ = AUDIO_FORMAT_MAP.get(fmt, AUDIO_FORMAT_MAP["mp3"])
-    out = (
-        f"{DOWNLOAD_DIR}/{folder}/%(playlist_index)s - %(title).100s.%(ext)s"
-        if folder else
-        f"{DOWNLOAD_DIR}/%(title).100s.%(ext)s"
-    )
-    out = (
-    f"{DOWNLOAD_DIR}/{folder}/%(title).100s.%(ext)s"   # no index for TikTok flat folder
-    if folder else
-    f"{DOWNLOAD_DIR}/%(title).100s.%(ext)s"
-  )
+    if folder and not single:
+        out = f"{DOWNLOAD_DIR}/{folder}/%(playlist_index)s - %(title).100s.%(ext)s"
+    elif folder and single:
+        out = f"{DOWNLOAD_DIR}/{folder}/%(title).100s.%(ext)s"
+    else:
+        out = f"{DOWNLOAD_DIR}/%(title).100s.%(ext)s"
     opts = _base_opts(progress_hook)
     opts.update({
         "outtmpl": out,
@@ -225,116 +240,152 @@ def build_audio_opts(
     return opts
 
 
-# ── Playlist result ────────────────────────────────────────────────────────────
-def _playlist_result(info: dict, mode: str) -> dict:
+# ── TikTok video opts ──────────────────────────────────────────────────────────
+def build_tiktok_video_opts(
+    quality: str,
+    progress_hook: Optional[Callable],
+    extra_extractor_args: Optional[dict] = None,
+    folder: Optional[str] = None,
+) -> dict:
+    # TikTok without impersonation — skip height filter, accept whatever is available
+    out = (
+        f"{DOWNLOAD_DIR}/{folder}/%(title).100s.%(ext)s"
+        if folder else
+        f"{DOWNLOAD_DIR}/%(title).100s.%(ext)s"
+    )
+    opts = _base_opts(progress_hook)
+    opts.update({
+        "outtmpl":             out,
+        "format":              "bestvideo+bestaudio/best",
+        "merge_output_format": "mp4",
+        "remux_video":         "mp4",
+    })
+    if extra_extractor_args:
+        opts["extractor_args"] = extra_extractor_args
+    return opts
+
+
+# ── extractor_args builder ─────────────────────────────────────────────────────
+def _make_ea(client: str) -> dict:
+    return {"youtube": {"player_client": [client], "js_runtimes": ["nodejs"]}}
+
+
+# ── Playlist result inspector ──────────────────────────────────────────────────
+def _playlist_result(info: Optional[dict], mode: str) -> dict:
+    if info is None:
+        return {"status": "error", "message": "yt-dlp returned no data. The content may be private, deleted, or region-locked."}
     if not info.get("entries"):
         return {"status": "done", "type": mode, "title": info.get("title", "video")}
-
     entries   = list(info["entries"])
     total     = len(entries)
     succeeded = sum(1 for e in entries if e is not None)
     failed    = total - succeeded
     title     = info.get("title") or info.get("playlist_title") or "Playlist"
-
     if succeeded == 0:
         return {"status": "error", "message": f"All {total} items failed to download."}
-
     msg = f"Downloaded {succeeded}/{total}" + (f" — {failed} skipped" if failed else "")
     return {"status": "done", "type": mode, "title": title, "message": msg}
 
 
-# ── Progress hook wrapper that injects track info ──────────────────────────────
-def _wrap_hook_with_track(progress_hook: Optional[Callable], playlist_index: list):
-    """
-    Wraps the progress hook to inject current track number into each update.
-    playlist_index is a mutable list [current, total] updated by the postprocessor hook.
-    """
-    if not progress_hook:
-        return None
-
-    def wrapped(d: dict):
-        if d.get("status") == "downloading":
-            idx   = playlist_index[0]
-            total = playlist_index[1]
-            if total and idx:
-                d["track_info"] = f"Track {idx} of {total}"
-            else:
-                d["track_info"] = ""
-        progress_hook(d)
-
-    return wrapped
-
-
-# ── Platform downloaders ───────────────────────────────────────────────────────
-def _make_ea(client: str) -> dict:
-    return {"youtube": {"player_client": [client], "js_runtimes": ["nodejs"]}}
-
-
+# ── YouTube download ───────────────────────────────────────────────────────────
 def download_youtube(url: str, mode: str, quality_or_fmt: str,
                      progress_hook: Optional[Callable] = None) -> dict:
+    """
+    Tries each client in order. Selects client list based on whether cookies.txt
+    exists — android/ios are skipped by yt-dlp when a cookiefile is set, so we
+    use web-based clients instead in that case.
+
+    Folder logic:
+    - Probe metadata first (fast, no download)
+    - If it's a playlist/album → named folder with numbered tracks
+    - If it's a single video  → YouTube/ folder, no number prefix
+    """
+    clients    = _youtube_clients()
     last_error = "Unknown error"
-    for client in YOUTUBE_CLIENTS:
+
+    for client in clients:
         try:
-            ea     = _make_ea(client)
-            probe  = build_video_opts(quality_or_fmt, None, ea)
-            folder = resolve_folder(url, probe)
+            ea = _make_ea(client)
 
-            # Probe total tracks for counter
-            track_state = [None, None]
+            # ── Fast metadata probe ──────────────────────────────────────────
+            probe_opts = {
+                **_base_opts(None),
+                "quiet":       True,
+                "noplaylist":  False,
+                "playlistend": 1,
+                "extractor_args": ea,
+            }
+
+            folder    = YOUTUBE_SINGLES_FOLDER
+            is_single = True
             try:
-                with yt_dlp.YoutubeDL(opts) as ydl:
-                    info = ydl.extract_info(url, download=True)
-                    if info is None:
-                        raise Exception("yt-dlp returned no data. The video may be private, deleted, or region-locked.")
-                    return _playlist_result(info, mode)
+                with yt_dlp.YoutubeDL(probe_opts) as ydl:
+                    meta = ydl.extract_info(url, download=False)
+                if meta:
+                    is_playlist = bool(meta.get("entries")) or meta.get("_type") == "playlist"
+                    if is_playlist:
+                        is_single = False
+                        folder    = build_playlist_folder(meta)
             except Exception:
-                pass
+                pass  # probe failed — default to singles folder
 
-            # Count up as each track starts
-            current = [0]
+            # ── Track counter setup ──────────────────────────────────────────
+            track_total   = [None]
+            track_current = [0]
+
+            if not is_single:
+                try:
+                    flat_opts = {**probe_opts, "extract_flat": True, "playlistend": 9999}
+                    with yt_dlp.YoutubeDL(flat_opts) as ydl:
+                        flat = ydl.extract_info(url, download=False)
+                    if flat and flat.get("entries"):
+                        track_total[0] = len(list(flat["entries"]))
+                except Exception:
+                    pass
+
             original_hook = progress_hook
 
             def counting_hook(d: dict):
-                if d.get("status") == "started" or (
-                    d.get("status") == "downloading" and d.get("downloaded_bytes", 0) < 65536
-                ):
-                    pass
                 if original_hook:
-                    if track_state[1] and current[0]:
-                        d["track_info"] = f"Track {current[0]} of {track_state[1]}"
+                    if track_total[0] and track_current[0]:
+                        d["track_info"] = f"Track {track_current[0]} of {track_total[0]}"
+                    else:
+                        d.setdefault("track_info", "")
                     original_hook(d)
-
-            # Use postprocessor hook to detect track changes
-            opts = (build_audio_opts(quality_or_fmt, counting_hook, ea, folder)
-                    if mode == "audio" else
-                    build_video_opts(quality_or_fmt, counting_hook, ea, folder))
 
             def pp_hook(d: dict):
                 if d.get("status") == "started":
-                    current[0] += 1
-                    if progress_hook and track_state[1]:
-                        progress_hook({
+                    track_current[0] += 1
+                    if original_hook and track_total[0]:
+                        original_hook({
                             "status":     "downloading",
                             "percent":    0,
-                            "track_info": f"Track {current[0]} of {track_state[1]}",
+                            "track_info": f"Track {track_current[0]} of {track_total[0]}",
                         })
 
+            # ── Build download opts ──────────────────────────────────────────
+            opts = (
+                build_audio_opts(quality_or_fmt, counting_hook, ea, folder, single=is_single)
+                if mode == "audio" else
+                build_video_opts(quality_or_fmt, counting_hook, ea, folder, single=is_single)
+            )
             opts["postprocessor_hooks"] = [pp_hook]
 
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=True)
-                result = _playlist_result(info, mode)
-                return result
+                return _playlist_result(info, mode)
+
         except Exception as e:
             last_error = str(e)
             if "Unsupported URL" in last_error:
                 break
+
     raise Exception(last_error)
 
 
-TIKTOK_FOLDER = "TikTok"   # add this near the top with other constants
-
-def download_tiktok(url, mode, quality_or_fmt, progress_hook=None):
+# ── TikTok download ────────────────────────────────────────────────────────────
+def download_tiktok(url: str, mode: str, quality_or_fmt: str,
+                    progress_hook: Optional[Callable] = None) -> dict:
     last_error = "Unknown error"
     for api_host in TIKTOK_API_HOSTS:
         try:
@@ -342,18 +393,15 @@ def download_tiktok(url, mode, quality_or_fmt, progress_hook=None):
                 "tiktok":  {"api_hostname": [api_host]},
                 "youtube": {"js_runtimes": ["nodejs"]},
             }
-            # All TikTok content goes into one shared folder, no per-video subfolders
+            # All TikTok content → shared TikTok/ folder, no per-video subfolders
             folder = TIKTOK_FOLDER
-
-            if mode == "audio":
-                opts = build_audio_opts(quality_or_fmt, progress_hook, ea, folder)
-            else:
-                opts = build_tiktok_video_opts(quality_or_fmt, progress_hook, ea, folder)
-
+            opts   = (
+                build_audio_opts(quality_or_fmt, progress_hook, ea, folder, single=True)
+                if mode == "audio" else
+                build_tiktok_video_opts(quality_or_fmt, progress_hook, ea, folder)
+            )
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=True)
-                if info is None:
-                    raise Exception("yt-dlp returned no data. Video may be private or region-locked.")
                 return _playlist_result(info, mode)
         except Exception as e:
             last_error = str(e)
@@ -364,38 +412,16 @@ def download_tiktok(url, mode, quality_or_fmt, progress_hook=None):
                 break
     raise Exception(last_error)
 
-def build_tiktok_video_opts(
-    quality: str,
-    progress_hook: Optional[Callable],
-    extra_extractor_args: Optional[dict] = None,
-    folder: Optional[str] = None,
-) -> dict:
-    # TikTok doesn't support height-based format selection without impersonation.
-    # Use a simpler format string that accepts whatever is available.
-    out = (
-        f"{DOWNLOAD_DIR}/{folder}/%(playlist_index)s - %(title).100s.%(ext)s"
-        if folder else
-        f"{DOWNLOAD_DIR}/%(title).100s.%(ext)s"
-    )
-    opts = _base_opts(progress_hook)
-    opts.update({
-        "outtmpl":             out,
-        "format":              "bestvideo+bestaudio/best",  # no height filter
-        "merge_output_format": "mp4",
-        "remux_video":         "mp4",
-    })
-    if extra_extractor_args:
-        opts["extractor_args"] = extra_extractor_args
-    return opts
 
+# ── Generic video download ─────────────────────────────────────────────────────
 def download_generic_video(url: str, mode: str, quality_or_fmt: str,
                            progress_hook: Optional[Callable] = None) -> dict:
-    ea     = {"youtube": {"js_runtimes": ["nodejs"]}}
-    probe  = build_video_opts(quality_or_fmt, None, ea)
-    folder = resolve_folder(url, probe)
-    opts   = (build_audio_opts(quality_or_fmt, progress_hook, ea, folder)
-              if mode == "audio" else
-              build_video_opts(quality_or_fmt, progress_hook, ea, folder))
+    ea   = {"youtube": {"js_runtimes": ["nodejs"]}}
+    opts = (
+        build_audio_opts(quality_or_fmt, progress_hook, ea, None, single=True)
+        if mode == "audio" else
+        build_video_opts(quality_or_fmt, progress_hook, ea, None, single=True)
+    )
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=True)
         return _playlist_result(info, mode)
@@ -418,11 +444,11 @@ def _get_filename(r: requests.Response, url: str) -> str:
 
 
 def download_file(url: str, progress_hook: Optional[Callable] = None) -> dict:
-    headers  = {"User-Agent": "Mozilla/5.0", "Accept": "*/*", "Accept-Encoding": "identity"}
-    proxies  = {"http": PROXY, "https": PROXY} if PROXY else None
+    headers = {"User-Agent": "Mozilla/5.0", "Accept": "*/*", "Accept-Encoding": "identity"}
+    proxies = {"http": PROXY, "https": PROXY} if PROXY else None
     r = requests.get(url, stream=True, headers=headers, timeout=60, proxies=proxies)
     r.raise_for_status()
-    if "text/html" in r.headers.get("Content-Type",""):
+    if "text/html" in r.headers.get("Content-Type", ""):
         raise Exception("Server returned an HTML page instead of a file.")
     filename   = _get_filename(r, url)
     path       = os.path.join(DOWNLOAD_DIR, filename)
@@ -444,34 +470,37 @@ def download_file(url: str, progress_hook: Optional[Callable] = None) -> dict:
     return {"status": "done", "type": "file", "title": filename}
 
 
-# ── Preview (metadata only, no download) ──────────────────────────────────────
+# ── Preview ────────────────────────────────────────────────────────────────────
 def preview_url(url: str) -> dict:
     opts = {
         "quiet":       True,
-        "noplaylist":  True,
+        "noplaylist":  False,
         "playlistend": 1,
         "js_runtimes": {"node": {}},
-        "extractor_args": {"youtube": {"player_client": ["tv_embedded"], "js_runtimes": ["nodejs"]}},
+        "remote_components": {"ejs:github"},
+        "extractor_args": {
+            "youtube": {"player_client": ["web"], "js_runtimes": ["nodejs"]},
+        },
     }
+    if _has_cookies():
+        opts["cookiefile"] = _cookies_path()
     if PROXY:
         opts["proxy"] = PROXY
-    COOKIES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
-    if os.path.exists(COOKIES):
-        opts["cookiefile"] = COOKIES
 
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
 
-    is_playlist = bool(info.get("entries"))
-    entries     = list(info.get("entries") or [])
-    count       = len(entries) if entries else 1
+    if info is None:
+        raise Exception("Could not fetch preview.")
 
+    entries = list(info.get("entries") or [])
+    count   = len(entries) if entries else 1
     return {
         "title":       info.get("title") or info.get("playlist_title") or "Unknown",
         "thumbnail":   info.get("thumbnail"),
         "duration":    info.get("duration"),
         "uploader":    info.get("uploader") or info.get("channel") or "",
-        "is_playlist": is_playlist,
+        "is_playlist": bool(entries),
         "count":       count,
         "url":         url,
     }
@@ -488,12 +517,10 @@ def get_storage_info() -> dict:
                 if os.path.isfile(path):
                     size = os.path.getsize(path)
                     total_bytes += size
-                    # Show relative path so subfolder files are identifiable
                     rel = os.path.relpath(path, DOWNLOAD_DIR)
                     files.append({"name": rel, "size": size})
     except Exception:
         pass
-
     files.sort(key=lambda f: f["name"].lower())
     disk = shutil.disk_usage(DOWNLOAD_DIR)
     return {
@@ -503,6 +530,7 @@ def get_storage_info() -> dict:
         "disk_total":  disk.total,
         "folder":      DOWNLOAD_DIR,
     }
+
 
 # ── Main entry ─────────────────────────────────────────────────────────────────
 def download(
