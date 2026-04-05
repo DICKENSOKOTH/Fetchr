@@ -98,9 +98,10 @@ source .venv/bin/activate
 cd backend
 pip install "yt-dlp[default]" --upgrade
 pip install -r requirements.txt
+pip install curl_cffi --upgrade
 ```
 
-The yt-dlp[default] install includes the yt-dlp-ejs component which is required
+The yt-dlp[default] install includpip install curl_cffi --upgradees the yt-dlp-ejs component which is required
 alongside Node.js for YouTube signature solving. Installing plain yt-dlp without
 [default] will cause all YouTube downloads to fail.
 
@@ -263,6 +264,7 @@ source .venv/bin/activate
 cd backend
 pip install "yt-dlp[default]" --upgrade
 pip install -r requirements.txt
+pip install curl_cffi --upgrade
 ```
 
 ### Run with gunicorn
