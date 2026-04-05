@@ -1,96 +1,96 @@
 /* Fetchr — app.js */
 
 const WS_PROTO = location.protocol === 'https:' ? 'wss' : 'ws';
-const WS_BASE  = `${WS_PROTO}://${location.host}`;
+const WS_BASE = `${WS_PROTO}://${location.host}`;
 
 // ── State ──────────────────────────────────────────────────────────────────────
 const S = {
-  history:      JSON.parse(localStorage.getItem('fetchr_history') || '[]'),
-  presets:      JSON.parse(localStorage.getItem('fetchr_presets') || '{}'),
-  allFiles:     [],
-  storageData:  [],
-  socket:       null,
-  downloading:  false,
-  mode:         'video',
-  quality:      '1080p',
-  audioFmt:     'mp3',
+  history: JSON.parse(localStorage.getItem('fetchr_history') || '[]'),
+  presets: JSON.parse(localStorage.getItem('fetchr_presets') || '{}'),
+  allFiles: [],
+  storageData: [],
+  socket: null,
+  downloading: false,
+  mode: 'video',
+  quality: '1080p',
+  audioFmt: 'mp3',
   notifEnabled: false,
 };
 
 // ── DOM ────────────────────────────────────────────────────────────────────────
-const el  = (id) => document.getElementById(id);
+const el = (id) => document.getElementById(id);
 const els = {
-  urlInput:          el('urlInput'),
-  clearBtn:          el('clearBtn'),
-  inspectBtn:        el('inspectBtn'),
-  downloadBtn:       el('downloadBtn'),
-  statusPanel:       el('statusPanel'),
-  statusIconWrap:    el('statusIconWrap'),
-  statusTitle:       el('statusTitle'),
-  statusDetail:      el('statusDetail'),
-  progressWrap:      el('progressWrap'),
-  progressBar:       el('progressBar'),
-  progressPct:       el('progressPct'),
-  speedBadge:        el('speedBadge'),
-  previewPanel:      el('previewPanel'),
-  previewThumb:      el('previewThumb'),
-  previewTitle:      el('previewTitle'),
-  previewMeta:       el('previewMeta'),
-  previewClose:      el('previewClose'),
-  recentList:        el('recentList'),
-  clearHistoryBtn:   el('clearHistoryBtn'),
-  exportCsvBtn:      el('exportCsvBtn'),
-  exportJsonBtn:     el('exportJsonBtn'),
-  queueList:         el('queueList'),
-  filesTableBody:    el('filesTableBody'),
-  folderPath:        el('folderPath'),
-  fileSearch:        el('fileSearch'),
-  fileCount:         el('fileCount'),
-  refreshBtn:        el('refreshBtn'),
-  storageBarFill:    el('storageBarFill'),
-  storageLabel:      el('storageLabel'),
-  scheduledList:     el('scheduledList'),
+  urlInput: el('urlInput'),
+  clearBtn: el('clearBtn'),
+  inspectBtn: el('inspectBtn'),
+  downloadBtn: el('downloadBtn'),
+  statusPanel: el('statusPanel'),
+  statusIconWrap: el('statusIconWrap'),
+  statusTitle: el('statusTitle'),
+  statusDetail: el('statusDetail'),
+  progressWrap: el('progressWrap'),
+  progressBar: el('progressBar'),
+  progressPct: el('progressPct'),
+  speedBadge: el('speedBadge'),
+  previewPanel: el('previewPanel'),
+  previewThumb: el('previewThumb'),
+  previewTitle: el('previewTitle'),
+  previewMeta: el('previewMeta'),
+  previewClose: el('previewClose'),
+  recentList: el('recentList'),
+  clearHistoryBtn: el('clearHistoryBtn'),
+  exportCsvBtn: el('exportCsvBtn'),
+  exportJsonBtn: el('exportJsonBtn'),
+  queueList: el('queueList'),
+  filesTableBody: el('filesTableBody'),
+  folderPath: el('folderPath'),
+  fileSearch: el('fileSearch'),
+  fileCount: el('fileCount'),
+  refreshBtn: el('refreshBtn'),
+  storageBarFill: el('storageBarFill'),
+  storageLabel: el('storageLabel'),
+  scheduledList: el('scheduledList'),
   refreshScheduledBtn: el('refreshScheduledBtn'),
-  scheduleInput:     el('scheduleInput'),
-  scheduleBtn:       el('scheduleBtn'),
-  clearScheduleBtn:  el('clearScheduleBtn'),
-  summaryText:       el('summaryText'),
-  serverDot:         el('serverDot'),
-  serverLabel:       el('serverLabel'),
-  updateBtn:         el('updateBtn'),
-  notifBtn:          el('notifBtn'),
-  presetSelect:      el('presetSelect'),
-  savePresetBtn:     el('savePresetBtn'),
-  deletePresetBtn:   el('deletePresetBtn'),
-  blockVideo:        el('blockVideo'),
-  blockAudio:        el('blockAudio'),
+  scheduleInput: el('scheduleInput'),
+  scheduleBtn: el('scheduleBtn'),
+  clearScheduleBtn: el('clearScheduleBtn'),
+  summaryText: el('summaryText'),
+  serverDot: el('serverDot'),
+  serverLabel: el('serverLabel'),
+  updateBtn: el('updateBtn'),
+  notifBtn: el('notifBtn'),
+  presetSelect: el('presetSelect'),
+  savePresetBtn: el('savePresetBtn'),
+  deletePresetBtn: el('deletePresetBtn'),
+  blockVideo: el('blockVideo'),
+  blockAudio: el('blockAudio'),
 };
 
 // ── Icons ──────────────────────────────────────────────────────────────────────
 const ICONS = {
-  idle:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>`,
+  idle: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>`,
   loading: `<svg class="spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>`,
-  done:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`,
-  error:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>`,
-  video:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="15" height="10" rx="2"/><path d="m17 9 5-2v10l-5-2V9z"/></svg>`,
-  audio:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`,
-  file:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`,
+  done: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`,
+  error: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>`,
+  video: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="15" height="10" rx="2"/><path d="m17 9 5-2v10l-5-2V9z"/></svg>`,
+  audio: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`,
+  file: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`,
 };
 
-const V_LABEL = { best:'Best available','4k':'4K','1440p':'1440p','1080p':'1080p HD','720p':'720p HD' };
-const V_CONT  = { best:'MP4','4k':'MKV','1440p':'MKV','1080p':'MP4','720p':'MP4' };
-const A_LABEL = { mp3:'MP3 · 320kbps',flac:'FLAC · Lossless',wav:'WAV · Lossless',opus:'Opus · HQ',aac:'AAC · HQ',alac:'ALAC · Apple Lossless' };
+const V_LABEL = { best: 'Best available', '4k': '4K', '1440p': '1440p', '1080p': '1080p HD', '720p': '720p HD' };
+const V_CONT = { best: 'MP4', '4k': 'MKV', '1440p': 'MKV', '1080p': 'MP4', '720p': 'MP4' };
+const A_LABEL = { mp3: 'MP3 · 320kbps', flac: 'FLAC · Lossless', wav: 'WAV · Lossless', opus: 'Opus · HQ', aac: 'AAC · HQ', alac: 'ALAC · Apple Lossless' };
 
 // ── Utility ────────────────────────────────────────────────────────────────────
 function esc(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function fmtBytes(b) {
-  if (b < 1024)          return `${b} B`;
-  if (b < 1024**2)       return `${(b/1024).toFixed(1)} KB`;
-  if (b < 1024**3)       return `${(b/1024**2).toFixed(1)} MB`;
-  return `${(b/1024**3).toFixed(2)} GB`;
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 ** 2) return `${(b / 1024).toFixed(1)} KB`;
+  if (b < 1024 ** 3) return `${(b / 1024 ** 2).toFixed(1)} MB`;
+  return `${(b / 1024 ** 3).toFixed(2)} GB`;
 }
 
 function fmtSpeed(bps) {
@@ -103,8 +103,8 @@ function fmtDuration(secs) {
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
   const s = Math.floor(secs % 60);
-  if (h) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-  return `${m}:${String(s).padStart(2,'0')}`;
+  if (h) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${m}:${String(s).padStart(2, '0')}`;
 }
 
 // ── Navigation ─────────────────────────────────────────────────────────────────
@@ -116,7 +116,7 @@ function initNav() {
       btn.classList.add('active');
       el(`view-${btn.dataset.view}`)?.classList.add('active');
       const v = btn.dataset.view;
-      if (v === 'files')     loadFiles();
+      if (v === 'files') loadFiles();
       if (v === 'scheduled') loadScheduled();
     });
   });
@@ -134,7 +134,7 @@ function setMode(mode) {
 
 function setVideoQuality(val) {
   S.quality = val;
-  ['best','4k','1440p','1080p','720p'].forEach((v) =>
+  ['best', '4k', '1440p', '1080p', '720p'].forEach((v) =>
     el(`q-${v}`)?.classList.toggle('active', v === val)
   );
   updateSummary();
@@ -142,7 +142,7 @@ function setVideoQuality(val) {
 
 function setAudioFmt(fmt) {
   S.audioFmt = fmt;
-  ['mp3','flac','wav','opus','aac','alac'].forEach((f) =>
+  ['mp3', 'flac', 'wav', 'opus', 'aac', 'alac'].forEach((f) =>
     el(`a-${f}`)?.classList.toggle('active', f === fmt)
   );
   updateSummary();
@@ -151,26 +151,26 @@ function setAudioFmt(fmt) {
 function updateSummary() {
   if (!els.summaryText) return;
   if (S.mode === 'video') {
-    els.summaryText.textContent = `Video · ${V_LABEL[S.quality]||S.quality} · ${V_CONT[S.quality]||'MP4'}`;
+    els.summaryText.textContent = `Video · ${V_LABEL[S.quality] || S.quality} · ${V_CONT[S.quality] || 'MP4'}`;
   } else {
-    els.summaryText.textContent = `Audio · ${A_LABEL[S.audioFmt]||S.audioFmt.toUpperCase()}`;
+    els.summaryText.textContent = `Audio · ${A_LABEL[S.audioFmt] || S.audioFmt.toUpperCase()}`;
   }
 }
 
 function initFormatSelector() {
   el('modeVideo').onclick = () => setMode('video');
   el('modeAudio').onclick = () => setMode('audio');
-  el('q-best').onclick  = () => setVideoQuality('best');
-  el('q-4k').onclick    = () => setVideoQuality('4k');
+  el('q-best').onclick = () => setVideoQuality('best');
+  el('q-4k').onclick = () => setVideoQuality('4k');
   el('q-1440p').onclick = () => setVideoQuality('1440p');
   el('q-1080p').onclick = () => setVideoQuality('1080p');
-  el('q-720p').onclick  = () => setVideoQuality('720p');
-  el('a-mp3').onclick   = () => setAudioFmt('mp3');
-  el('a-flac').onclick  = () => setAudioFmt('flac');
-  el('a-wav').onclick   = () => setAudioFmt('wav');
-  el('a-opus').onclick  = () => setAudioFmt('opus');
-  el('a-aac').onclick   = () => setAudioFmt('aac');
-  el('a-alac').onclick  = () => setAudioFmt('alac');
+  el('q-720p').onclick = () => setVideoQuality('720p');
+  el('a-mp3').onclick = () => setAudioFmt('mp3');
+  el('a-flac').onclick = () => setAudioFmt('flac');
+  el('a-wav').onclick = () => setAudioFmt('wav');
+  el('a-opus').onclick = () => setAudioFmt('opus');
+  el('a-aac').onclick = () => setAudioFmt('aac');
+  el('a-alac').onclick = () => setAudioFmt('alac');
   updateSummary();
 }
 
@@ -180,7 +180,7 @@ function renderPresets() {
   sel.innerHTML = '<option value="">Load preset...</option>';
   Object.keys(S.presets).forEach((name) => {
     const opt = document.createElement('option');
-    opt.value       = name;
+    opt.value = name;
     opt.textContent = name;
     sel.appendChild(opt);
   });
@@ -236,7 +236,7 @@ function initNotifications() {
 
 function updateNotifBtn() {
   const on = S.notifEnabled && Notification.permission === 'granted';
-  els.notifBtn.classList.toggle('notif-on',  on);
+  els.notifBtn.classList.toggle('notif-on', on);
   els.notifBtn.classList.toggle('notif-off', !on);
   els.notifBtn.title = on ? 'Notifications on' : 'Notifications off';
 }
@@ -253,15 +253,15 @@ function initPreview() {
     if (!url) return;
     els.inspectBtn.disabled = true;
     try {
-      const res  = await fetch(`/preview?url=${encodeURIComponent(url)}`);
+      const res = await fetch(`/preview?url=${encodeURIComponent(url)}`);
       if (!res.ok) throw new Error('Could not fetch preview');
       const data = await res.json();
 
-      els.previewThumb.src     = data.thumbnail || '';
+      els.previewThumb.src = data.thumbnail || '';
       els.previewTitle.textContent = data.title || url;
       const parts = [];
-      if (data.uploader)    parts.push(data.uploader);
-      if (data.duration)    parts.push(fmtDuration(data.duration));
+      if (data.uploader) parts.push(data.uploader);
+      if (data.duration) parts.push(fmtDuration(data.duration));
       if (data.is_playlist) parts.push(`${data.count} tracks`);
       els.previewMeta.textContent = parts.join(' · ');
       els.previewPanel.classList.remove('hidden');
@@ -281,7 +281,7 @@ function initUpdateBtn() {
     els.updateBtn.disabled = true;
     els.updateBtn.textContent = 'Updating...';
     try {
-      const res  = await fetch('/update-ytdlp', { method: 'POST' });
+      const res = await fetch('/update-ytdlp', { method: 'POST' });
       const data = await res.json();
       els.updateBtn.textContent = data.status === 'ok' ? 'Updated!' : 'Failed';
       setTimeout(() => {
@@ -299,13 +299,13 @@ function initUpdateBtn() {
 function initSchedule() {
   els.scheduleBtn.onclick = async () => {
     const url = els.urlInput.value.trim();
-    const dt  = els.scheduleInput.value;
+    const dt = els.scheduleInput.value;
     if (!url || !dt) { alert('Enter a URL and pick a date/time.'); return; }
     const runAt = new Date(dt).getTime() / 1000;
     if (runAt <= Date.now() / 1000) { alert('Time must be in the future.'); return; }
 
     const res = await fetch('/schedule', {
-      method:  'POST',
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         url, run_at: runAt,
@@ -328,7 +328,7 @@ function initSchedule() {
 
 async function loadScheduled() {
   try {
-    const res  = await fetch('/scheduled');
+    const res = await fetch('/scheduled');
     const data = await res.json();
     renderScheduled(data.scheduled || {});
   } catch {
@@ -367,12 +367,12 @@ async function checkServer() {
   try {
     const r = await fetch('/health', { signal: AbortSignal.timeout(3000) });
     if (r.ok) {
-      els.serverDot.className    = 'status-dot online';
+      els.serverDot.className = 'status-dot online';
       els.serverLabel.textContent = 'Server online';
       return true;
     }
   } catch { /* ignore */ }
-  els.serverDot.className    = 'status-dot offline';
+  els.serverDot.className = 'status-dot offline';
   els.serverLabel.textContent = 'Server offline';
   return false;
 }
@@ -395,31 +395,31 @@ function initUrlInput() {
 
 // ── Status panel ───────────────────────────────────────────────────────────────
 function setStatus(type, title, detail) {
-  els.statusPanel.className    = `status-panel${type !== 'idle' ? ` is-${type}` : ''}`;
+  els.statusPanel.className = `status-panel${type !== 'idle' ? ` is-${type}` : ''}`;
   els.statusIconWrap.innerHTML = ICONS[type] || ICONS.idle;
-  els.statusTitle.textContent  = title;
+  els.statusTitle.textContent = title;
   els.statusDetail.textContent = detail;
 }
 
 function showProgress(show) {
   els.progressWrap.style.display = show ? 'block' : 'none';
   if (!show) {
-    els.progressBar.className        = 'progress-bar';
-    els.progressBar.style.width      = '0%';
+    els.progressBar.className = 'progress-bar';
+    els.progressBar.style.width = '0%';
     els.progressBar.style.background = '';
-    els.progressPct.textContent      = '';
-    els.speedBadge.textContent       = '';
+    els.progressPct.textContent = '';
+    els.speedBadge.textContent = '';
   }
 }
 
 function setProgress(pct, indeterminate = false) {
   els.progressWrap.style.display = 'block';
   if (indeterminate) {
-    els.progressBar.className   = 'progress-bar indeterminate';
+    els.progressBar.className = 'progress-bar indeterminate';
     els.progressBar.style.width = '';
     els.progressPct.textContent = '';
   } else {
-    els.progressBar.className   = 'progress-bar';
+    els.progressBar.className = 'progress-bar';
     els.progressBar.style.width = `${Math.min(pct, 100)}%`;
     els.progressPct.textContent = `${Math.round(pct)}%`;
   }
@@ -429,7 +429,7 @@ function setProgress(pct, indeterminate = false) {
 async function startDownload() {
   if (S.downloading) return;
 
-  const raw  = els.urlInput.value.trim();
+  const raw = els.urlInput.value.trim();
   if (!raw) { els.urlInput.focus(); return; }
   const urls = raw.split(',').map((u) => u.trim()).filter(Boolean);
   for (const u of urls) {
@@ -441,14 +441,14 @@ async function startDownload() {
 
   if (S.socket) { S.socket.close(); S.socket = null; }
 
-  S.downloading            = true;
+  S.downloading = true;
   els.downloadBtn.disabled = true;
   setStatus('loading', 'Starting...', urls.length > 1 ? `${urls.length} URLs` : urls[0]);
   setProgress(0, true);
 
   try {
     const res = await fetch('/download', {
-      method:  'POST',
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: raw, mode: S.mode, quality: S.quality, audio_fmt: S.audioFmt }),
     });
@@ -459,7 +459,7 @@ async function startDownload() {
       throw new Error(err.detail || `Server error ${res.status}`);
     }
 
-    const data   = await res.json();
+    const data = await res.json();
     const jobIds = data.job_ids || (data.job_id ? [data.job_id] : []);
     if (!jobIds.length) throw new Error('No jobs returned from server');
 
@@ -470,14 +470,14 @@ async function startDownload() {
 
     if (jobIds.length > 1) {
       setStatus('loading', `Downloading ${jobIds.length} items`, 'See queue for individual progress');
-      S.downloading            = false;
+      S.downloading = false;
       els.downloadBtn.disabled = false;
     }
 
   } catch (err) {
     setStatus('error', 'Failed', err.message);
     showProgress(false);
-    S.downloading            = false;
+    S.downloading = false;
     els.downloadBtn.disabled = false;
     checkServer();
   }
@@ -488,10 +488,10 @@ function connectWS(jobId, url, qId) {
   let ws;
   try { ws = new WebSocket(`${WS_BASE}/ws/${jobId}`); }
   catch { poll(jobId, url, qId); return; }
-  S.socket     = ws;
-  ws.onmessage = (e) => { try { onJobUpdate(JSON.parse(e.data), url, qId); } catch {} };
-  ws.onerror   = ()  => { ws.close(); poll(jobId, url, qId); };
-  ws.onclose   = ()  => { S.socket = null; };
+  S.socket = ws;
+  ws.onmessage = (e) => { try { onJobUpdate(JSON.parse(e.data), url, qId); } catch { } };
+  ws.onerror = () => { ws.close(); poll(jobId, url, qId); };
+  ws.onclose = () => { S.socket = null; };
 }
 
 function poll(jobId, url, qId) {
@@ -522,19 +522,19 @@ function onJobUpdate(job, url, qId) {
     addHistory({ url, title: job.title || url, status: 'done', type: job.type || S.mode });
     finishQueueItem(qId, true, job.title);
     sendNotification('Download complete', job.title || url);
-    S.downloading            = false;
+    S.downloading = false;
     els.downloadBtn.disabled = false;
 
   } else if (job.status === 'error') {
     setStatus('error', 'Download failed', job.message || 'Unknown error');
-    els.speedBadge.textContent       = '';
+    els.speedBadge.textContent = '';
     els.progressBar.style.background = 'var(--red)';
     setProgress(100);
     setTimeout(() => showProgress(false), 2000);
     addHistory({ url, title: url, status: 'error', type: 'error' });
     finishQueueItem(qId, false, job.message);
     sendNotification('Download failed', job.message || url);
-    S.downloading            = false;
+    S.downloading = false;
     els.downloadBtn.disabled = false;
   }
 }
@@ -554,11 +554,11 @@ function renderHistory() {
     return;
   }
   els.recentList.innerHTML = S.history.slice(0, 8).map((e) => {
-    const isV   = e.type === 'video';
-    const isA   = e.type === 'audio';
+    const isV = e.type === 'video';
+    const isA = e.type === 'audio';
     const isErr = e.status === 'error';
-    const cls   = isV ? 'type-video' : isA ? 'type-audio' : isErr ? 'type-error' : 'type-file';
-    const ico   = isV ? ICONS.video  : isA ? ICONS.audio  : isErr ? ICONS.error  : ICONS.file;
+    const cls = isV ? 'type-video' : isA ? 'type-audio' : isErr ? 'type-error' : 'type-file';
+    const ico = isV ? ICONS.video : isA ? ICONS.audio : isErr ? ICONS.error : ICONS.file;
     const badge = e.status === 'done'
       ? '<span class="recent-item-badge done">Done</span>'
       : '<span class="recent-item-badge error">Failed</span>';
@@ -576,12 +576,12 @@ function exportHistory(format) {
   if (!S.history.length) { alert('No history to export.'); return; }
   let content, mime, ext;
   if (format === 'csv') {
-    const rows = [['Title','URL','Status','Type','Date']];
+    const rows = [['Title', 'URL', 'Status', 'Type', 'Date']];
     S.history.forEach((e) => rows.push([
-      `"${(e.title||'').replace(/"/g,'""')}"`,
-      `"${(e.url||'').replace(/"/g,'""')}"`,
-      e.status, e.type||'',
-      new Date(e.timestamp||0).toISOString(),
+      `"${(e.title || '').replace(/"/g, '""')}"`,
+      `"${(e.url || '').replace(/"/g, '""')}"`,
+      e.status, e.type || '',
+      new Date(e.timestamp || 0).toISOString(),
     ]));
     content = rows.map((r) => r.join(',')).join('\n');
     mime = 'text/csv'; ext = 'csv';
@@ -590,8 +590,8 @@ function exportHistory(format) {
     mime = 'application/json'; ext = 'json';
   }
   const blob = new Blob([content], { type: mime });
-  const a    = document.createElement('a');
-  a.href     = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
   a.download = `fetchr-history.${ext}`;
   a.click();
   URL.revokeObjectURL(a.href);
@@ -622,15 +622,15 @@ function addToQueue(url) {
 }
 
 function updateQueueProgress(id, pct, msg, speed, trackInfo) {
-  const p    = el(`qp-${id}`);
-  const b    = el(`qb-${id}`);
-  const m    = el(`qm-${id}`);
-  const t    = el(`qt-${id}`);
-  const spd  = el(`qspd-${id}`);
+  const p = el(`qp-${id}`);
+  const b = el(`qb-${id}`);
+  const m = el(`qm-${id}`);
+  const t = el(`qt-${id}`);
+  const spd = el(`qspd-${id}`);
   if (!p) return;
-  p.textContent   = pct > 0 ? `${Math.round(pct)}%` : 'Downloading';
-  if (m)   m.textContent   = msg || '';
-  if (t)   t.textContent   = trackInfo || '';
+  p.textContent = pct > 0 ? `${Math.round(pct)}%` : 'Downloading';
+  if (m) m.textContent = msg || '';
+  if (t) t.textContent = trackInfo || '';
   if (spd) spd.textContent = fmtSpeed(speed);
   if (pct > 0) { b.className = 'queue-item-bar'; b.style.width = `${Math.min(pct, 100)}%`; }
   else b.className = 'queue-item-bar indeterminate';
@@ -640,13 +640,13 @@ function finishQueueItem(id, ok, label) {
   const p = el(`qp-${id}`), b = el(`qb-${id}`), m = el(`qm-${id}`);
   const t = el(`qt-${id}`), spd = el(`qspd-${id}`);
   if (!p) return;
-  p.textContent      = ok ? 'Done' : 'Failed';
-  p.style.color      = `var(--${ok ? 'green' : 'red'})`;
-  b.className        = 'queue-item-bar';
-  b.style.width      = '100%';
+  p.textContent = ok ? 'Done' : 'Failed';
+  p.style.color = `var(--${ok ? 'green' : 'red'})`;
+  b.className = 'queue-item-bar';
+  b.style.width = '100%';
   b.style.background = `var(--${ok ? 'green' : 'red'})`;
   if (m && label) m.textContent = label;
-  if (t)   t.textContent = '';
+  if (t) t.textContent = '';
   if (spd) spd.textContent = '';
 
   setTimeout(() => {
@@ -676,22 +676,22 @@ async function loadFiles() {
 }
 
 function renderStorage(data) {
-  const used  = data.total_bytes || 0;
-  const total = data.disk_total  || 1;
-  const free  = data.disk_free   || 0;
-  const pct   = Math.min(used / total * 100, 100);
+  const used = data.total_bytes || 0;
+  const total = data.disk_total || 1;
+  const free = data.disk_free || 0;
+  const pct = Math.min(used / total * 100, 100);
   els.storageBarFill.style.width = `${pct}%`;
-  els.storageLabel.textContent   = `${fmtBytes(used)} used · ${fmtBytes(free)} free`;
+  els.storageLabel.textContent = `${fmtBytes(used)} used · ${fmtBytes(free)} free`;
   if (pct > 85) els.storageBarFill.style.background = 'var(--red)';
   else if (pct > 65) els.storageBarFill.style.background = 'var(--accent)';
   else els.storageBarFill.style.background = '';
 }
 
 function fileType(ext) {
-  if (['mp4','mkv','webm','avi','mov','flv','wmv'].includes(ext))               return 'video';
-  if (['mp3','flac','wav','opus','aac','m4a','ogg','alac'].includes(ext))       return 'audio';
-  if (['jpg','jpeg','png','gif','webp','svg','bmp'].includes(ext))              return 'image';
-  if (['pdf','docx','xlsx','pptx','txt','html','zip','rar','epub'].includes(ext)) return 'doc';
+  if (['mp4', 'mkv', 'webm', 'avi', 'mov', 'flv', 'wmv'].includes(ext)) return 'video';
+  if (['mp3', 'flac', 'wav', 'opus', 'aac', 'm4a', 'ogg', 'alac'].includes(ext)) return 'audio';
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(ext)) return 'image';
+  if (['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'html', 'zip', 'rar', 'epub'].includes(ext)) return 'doc';
   return 'other';
 }
 
@@ -705,8 +705,8 @@ function renderFiles(files) {
     const name = f.name || f;
     const size = f.size != null ? fmtBytes(f.size) : '';
     const parts = name.split('.');
-    const ext   = parts.length > 1 ? parts.pop().toLowerCase() : '';
-    const type  = fileType(ext);
+    const ext = parts.length > 1 ? parts.pop().toLowerCase() : '';
+    const type = fileType(ext);
     return `
       <tr>
         <td class="filename">${esc(name)}</td>
@@ -732,7 +732,7 @@ async function deleteFile(name) {
 function initFileSearch() {
   els.fileSearch.addEventListener('input', () => {
     const q = els.fileSearch.value.toLowerCase();
-    renderFiles(S.storageData.filter((f) => (f.name||f).toLowerCase().includes(q)));
+    renderFiles(S.storageData.filter((f) => (f.name || f).toLowerCase().includes(q)));
   });
 }
 
@@ -758,7 +758,7 @@ function init() {
     renderHistory();
   });
 
-  els.exportCsvBtn.addEventListener('click',  () => exportHistory('csv'));
+  els.exportCsvBtn.addEventListener('click', () => exportHistory('csv'));
   els.exportJsonBtn.addEventListener('click', () => exportHistory('json'));
 
   renderHistory();

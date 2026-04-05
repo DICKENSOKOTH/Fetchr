@@ -32,9 +32,9 @@ VIDEO_DOMAINS = [
     "instagram.com","facebook.com","reddit.com",
     "streamable.com","rumble.com","odysee.com","bitchute.com",
 ]
-VIDEO_PATH_HINTS = [".m3u8",".m3u","/stream","/watch","/video","/play"]
+VIDEO_PATH_HINTS = [".m3u8",".m3u","/stream","/watch","/video","/play","/embed","/e/","/v/"]
 
-YOUTUBE_CLIENTS  = ["android", "ios", "tv_embedded", "web_creator"]
+YOUTUBE_CLIENTS  = ["android", "ios", "tv_embedded", "web_creator", "web", "desktop", "mweb", "youtube_music",]
 TIKTOK_API_HOSTS = [
     "api22-normal-c-useast2a.tiktokv.com",
     "api19-normal-c-useast1a.tiktokv.com",
@@ -482,16 +482,20 @@ def get_storage_info() -> dict:
     files = []
     total_bytes = 0
     try:
-        for name in sorted(os.listdir(DOWNLOAD_DIR)):
-            path = os.path.join(DOWNLOAD_DIR, name)
-            if os.path.isfile(path):
-                size = os.path.getsize(path)
-                total_bytes += size
-                files.append({"name": name, "size": size})
+        for root, dirs, filenames in os.walk(DOWNLOAD_DIR):
+            for name in sorted(filenames):
+                path = os.path.join(root, name)
+                if os.path.isfile(path):
+                    size = os.path.getsize(path)
+                    total_bytes += size
+                    # Show relative path so subfolder files are identifiable
+                    rel = os.path.relpath(path, DOWNLOAD_DIR)
+                    files.append({"name": rel, "size": size})
     except Exception:
         pass
 
-    disk  = shutil.disk_usage(DOWNLOAD_DIR)
+    files.sort(key=lambda f: f["name"].lower())
+    disk = shutil.disk_usage(DOWNLOAD_DIR)
     return {
         "files":       files,
         "total_bytes": total_bytes,
@@ -499,7 +503,6 @@ def get_storage_info() -> dict:
         "disk_total":  disk.total,
         "folder":      DOWNLOAD_DIR,
     }
-
 
 # ── Main entry ─────────────────────────────────────────────────────────────────
 def download(

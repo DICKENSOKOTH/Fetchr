@@ -163,20 +163,21 @@ def storage_info():
     return get_storage_info()
 
 
-@app.delete("/files/{filename}")
+@app.delete("/files/{filename:path}")
 def delete_file(filename: str):
-    """Delete a downloaded file by name."""
-    # Security: strip any path traversal
-    safe_name = os.path.basename(filename)
-    path = os.path.join(DOWNLOAD_DIR, safe_name)
+    # :path allows slashes in the filename parameter
+    safe = os.path.normpath(filename)
+    # Prevent path traversal outside DOWNLOAD_DIR
+    path = os.path.abspath(os.path.join(DOWNLOAD_DIR, safe))
+    if not path.startswith(os.path.abspath(DOWNLOAD_DIR)):
+        raise HTTPException(status_code=400, detail="Invalid path.")
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="File not found")
     try:
         os.remove(path)
-        return {"status": "deleted", "file": safe_name}
+        return {"status": "deleted", "file": filename}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/preview")
 async def preview(url: str):
