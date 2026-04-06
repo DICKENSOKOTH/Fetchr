@@ -354,7 +354,9 @@ def download_youtube(url: str, mode: str, quality_or_fmt: str,
                     original_hook(d)
 
             def pp_hook(d: dict):
-                if d.get("status") == "started":
+                # "started" fires for every postprocessor — only count on the first one
+                # by checking for "filename" which is only present on the initial file hook
+                if d.get("status") == "started" and "filename" in d:
                     track_current[0] += 1
                     if original_hook and track_total[0]:
                         original_hook({
