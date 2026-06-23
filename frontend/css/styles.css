@@ -36,7 +36,7 @@
 html, body { height: 100%; }
 body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; line-height: 1.6; display: flex; overflow: hidden; }
 
-/* ── Sidebar ── */
+/*  Sidebar  */
 .sidebar { width: 220px; min-width: 220px; background: var(--bg-2); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 24px 0; height: 100vh; }
 .brand { display: flex; align-items: center; gap: 10px; padding: 0 20px 28px; border-bottom: 1px solid var(--border); }
 .brand-icon { width: 28px; height: 28px; color: var(--accent); flex-shrink: 0; }
@@ -56,7 +56,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--sans); font
 .update-btn svg { width: 13px; height: 13px; flex-shrink: 0; }
 .update-btn:hover { background: var(--bg-4); color: var(--text-2); }
 
-/* ── Main ── */
+/*  Main  */
 .main { flex: 1; overflow-y: auto; height: 100vh; }
 .main::-webkit-scrollbar { width: 5px; }
 .main::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 3px; }
@@ -69,7 +69,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--sans); font
 .folder-path { font-family: var(--mono); font-size: 11px; }
 .header-actions { display: flex; gap: 8px; flex-shrink: 0; }
 
-/* ── Preview panel ── */
+/*  Preview panel  */
 .preview-panel {
   display: flex;
   align-items: center;
@@ -89,7 +89,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--sans); font
 .preview-close svg { width: 14px; height: 14px; }
 .preview-close:hover { color: var(--text); }
 
-/* ── Input card ── */
+/*  Input card  */
 .input-card { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--rl); padding: 24px; margin-bottom: 20px; }
 .input-label { display: block; font-family: var(--mono); font-size: 11px; color: var(--text-3); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 10px; }
 .input-row { display: flex; gap: 10px; align-items: center; }
@@ -118,7 +118,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--sans); font
 .btn-small.btn-danger { border-color: var(--red-bd); color: var(--red); }
 .btn-small.btn-danger:hover { background: var(--red-bg); }
 
-/* ── Format section ── */
+/*  Format section  */
 .format-section { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 16px; }
 .format-block { display: flex; flex-direction: column; gap: 8px; }
 .format-block-label { font-family: var(--mono); font-size: 11px; color: var(--text-3); letter-spacing: .07em; text-transform: uppercase; }
@@ -136,17 +136,17 @@ body { background: var(--bg); color: var(--text); font-family: var(--sans); font
 .format-summary svg { width: 14px; height: 14px; flex-shrink: 0; color: var(--accent); }
 .hidden { display: none !important; }
 
-/* ── Preset row ── */
+/*  Preset row  */
 .preset-row { display: flex; gap: 8px; align-items: center; }
 .preset-select { flex: 1; background: var(--bg-3); border: 1px solid var(--border); border-radius: var(--r); color: var(--text-2); font-family: var(--mono); font-size: 12px; padding: 6px 10px; outline: none; cursor: pointer; }
 .preset-select:focus { border-color: var(--border-2); }
 
-/* ── Schedule row ── */
+/*  Schedule row  */
 .schedule-row { display: flex; gap: 8px; align-items: center; }
 .schedule-input { flex: 1; background: var(--bg-3); border: 1px solid var(--border); border-radius: var(--r); color: var(--text-2); font-family: var(--mono); font-size: 12px; padding: 6px 10px; outline: none; color-scheme: dark; }
 .schedule-input:focus { border-color: var(--border-2); }
 
-/* ── Status panel ── */
+/*  Status panel  */
 .status-panel { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--rl); padding: 20px 24px; margin-bottom: 28px; transition: border-color .3s; }
 .status-panel.is-loading { border-color: var(--blue); }
 .status-panel.is-done    { border-color: var(--green); }
@@ -173,7 +173,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--sans); font
 @keyframes spin { to { transform: rotate(360deg); } }
 .spinning { animation: spin 1s linear infinite; }
 
-/* ── Recent ── */
+/*  Recent  */
 .recent-wrap { margin-top: 4px; }
 .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .section-header h2 { font-size: 12px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: .07em; }
@@ -197,7 +197,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--sans); font
 .recent-item-badge.done  { background: var(--green-bg); color: var(--green); }
 .recent-item-badge.error { background: var(--red-bg);   color: var(--red); }
 
-/* ── Queue ── */
+/*  Queue  */
 .queue-list { display: flex; flex-direction: column; gap: 10px; }
 .queue-item { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--rl); padding: 16px 20px; }
 .queue-item-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
@@ -211,13 +211,13 @@ body { background: var(--bg); color: var(--text); font-family: var(--sans); font
 .queue-item-bar { height: 100%; background: var(--blue); border-radius: 2px; width: 0%; transition: width .35s ease; }
 .queue-item-bar.indeterminate { width: 40%; animation: pslide 1.4s ease-in-out infinite; }
 
-/* ── Storage bar ── */
+/*  Storage bar  */
 .storage-bar-wrap { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
 .storage-bar-track { flex: 1; height: 4px; background: var(--bg-3); border-radius: 2px; overflow: hidden; }
 .storage-bar-fill  { height: 100%; background: var(--blue); border-radius: 2px; transition: width .4s ease; }
 .storage-label { font-family: var(--mono); font-size: 11px; color: var(--text-3); white-space: nowrap; flex-shrink: 0; }
 
-/* ── Files ── */
+/*  Files  */
 .files-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; gap: 16px; }
 .search-wrap { flex: 1; max-width: 360px; display: flex; align-items: center; gap: 10px; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r); padding: 0 14px; }
 .search-wrap svg { width: 15px; height: 15px; color: var(--text-3); flex-shrink: 0; }
@@ -243,7 +243,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--sans); font
 .type-badge.doc   { background: var(--bg-4);      color: var(--text-2); }
 .type-badge.other { background: var(--bg-3);      color: var(--text-3); }
 
-/* ── Scheduled list ── */
+/*  Scheduled list  */
 .scheduled-list { display: flex; flex-direction: column; gap: 10px; }
 .sched-item { display: flex; align-items: center; gap: 14px; padding: 14px 18px; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--rl); }
 .sched-item-info { flex: 1; min-width: 0; }
@@ -251,17 +251,17 @@ body { background: var(--bg); color: var(--text); font-family: var(--sans); font
 .sched-item-time { font-family: var(--mono); font-size: 11px; color: var(--blue); margin-top: 3px; }
 .sched-item-fmt  { font-family: var(--mono); font-size: 11px; color: var(--text-3); }
 
-/* ── Empty states ── */
+/*  Empty states  */
 .empty-state { text-align: center; color: var(--text-3); font-family: var(--mono); font-size: 12px; padding: 24px; }
 .empty-state-block { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 60px 20px; color: var(--text-3); background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--rl); }
 .empty-state-block svg { width: 32px; height: 32px; opacity: .35; }
 .empty-state-block p { font-size: 13px; font-weight: 600; }
 
-/* ── Notification badge on button ── */
+/*  Notification badge on button  */
 .btn-secondary.notif-on  { border-color: var(--green-bg); color: var(--green); }
 .btn-secondary.notif-off { opacity: .6; }
 
-/* ── Responsive ── */
+/*  Responsive  */
 @media (max-width: 680px) {
   body { flex-direction: column; overflow: auto; }
   .sidebar { width: 100%; height: auto; flex-direction: row; align-items: center; padding: 14px 16px; border-right: none; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; }

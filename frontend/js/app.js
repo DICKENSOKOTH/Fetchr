@@ -1,9 +1,23 @@
 /* Fetchr — app.js */
+// Get backend URL from Netlify environment variable 
 
+const API = import.meta.env.VITE_API_URL;
+
+const originalFetch = window.fetch;
+
+window.fetch = (url, options) => {
+  if (url.startsWith("/")) {
+    url = API + url;
+  }
+
+  return originalFetch(url, options);
+};
+
+//end of fetch override
 const WS_PROTO = location.protocol === 'https:' ? 'wss' : 'ws';
 const WS_BASE = `${WS_PROTO}://${location.host}`;
 
-// ── State ──────────────────────────────────────────────────────────────────────
+//  State 
 const S = {
   history: JSON.parse(localStorage.getItem('fetchr_history') || '[]'),
   presets: JSON.parse(localStorage.getItem('fetchr_presets') || '{}'),
@@ -17,7 +31,7 @@ const S = {
   notifEnabled: false,
 };
 
-// ── DOM ────────────────────────────────────────────────────────────────────────
+//  DOM 
 const el = (id) => document.getElementById(id);
 const els = {
   urlInput: el('urlInput'),
@@ -66,7 +80,7 @@ const els = {
   blockAudio: el('blockAudio'),
 };
 
-// ── Icons ──────────────────────────────────────────────────────────────────────
+//  Icons 
 const ICONS = {
   idle: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>`,
   loading: `<svg class="spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>`,
@@ -81,7 +95,7 @@ const V_LABEL = { best: 'Best available', '4k': '4K', '1440p': '1440p', '1080p':
 const V_CONT = { best: 'MP4', '4k': 'MKV', '1440p': 'MKV', '1080p': 'MP4', '720p': 'MP4' };
 const A_LABEL = { mp3: 'MP3 · 320kbps', flac: 'FLAC · Lossless', wav: 'WAV · Lossless', opus: 'Opus · HQ', aac: 'AAC · HQ', alac: 'ALAC · Apple Lossless' };
 
-// ── Utility ────────────────────────────────────────────────────────────────────
+//  Utility 
 function esc(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -107,7 +121,7 @@ function fmtDuration(secs) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-// ── Navigation ─────────────────────────────────────────────────────────────────
+//  Navigation 
 function initNav() {
   document.querySelectorAll('.nav-item').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -122,7 +136,7 @@ function initNav() {
   });
 }
 
-// ── Format selector ────────────────────────────────────────────────────────────
+//  Format selector 
 function setMode(mode) {
   S.mode = mode;
   el('modeVideo').classList.toggle('active', mode === 'video');
@@ -174,7 +188,7 @@ function initFormatSelector() {
   updateSummary();
 }
 
-// ── Presets ────────────────────────────────────────────────────────────────────
+//  Presets 
 function renderPresets() {
   const sel = els.presetSelect;
   sel.innerHTML = '<option value="">Load preset...</option>';
@@ -216,7 +230,7 @@ function initPresets() {
   };
 }
 
-// ── Notifications ──────────────────────────────────────────────────────────────
+//  Notifications 
 function initNotifications() {
   updateNotifBtn();
   els.notifBtn.onclick = async () => {
@@ -246,7 +260,7 @@ function sendNotification(title, body) {
   new Notification(`Fetchr: ${title}`, { body, icon: '' });
 }
 
-// ── Preview ────────────────────────────────────────────────────────────────────
+//  Preview 
 function initPreview() {
   els.inspectBtn.onclick = async () => {
     const url = els.urlInput.value.trim();
@@ -275,7 +289,7 @@ function initPreview() {
   els.previewClose.onclick = () => els.previewPanel.classList.add('hidden');
 }
 
-// ── yt-dlp update ──────────────────────────────────────────────────────────────
+//  yt-dlp update 
 function initUpdateBtn() {
   els.updateBtn.onclick = async () => {
     els.updateBtn.disabled = true;
@@ -295,7 +309,7 @@ function initUpdateBtn() {
   };
 }
 
-// ── Schedule ───────────────────────────────────────────────────────────────────
+//  Schedule 
 function initSchedule() {
   els.scheduleBtn.onclick = async () => {
     const url = els.urlInput.value.trim();
@@ -362,7 +376,7 @@ async function cancelScheduled(id) {
   loadScheduled();
 }
 
-// ── Server health ──────────────────────────────────────────────────────────────
+//  Server health 
 async function checkServer() {
   try {
     const r = await fetch('/health', { signal: AbortSignal.timeout(3000) });
@@ -377,7 +391,7 @@ async function checkServer() {
   return false;
 }
 
-// ── URL input ──────────────────────────────────────────────────────────────────
+//  URL input 
 function initUrlInput() {
   els.urlInput.addEventListener('input', () => {
     els.clearBtn.classList.toggle('visible', els.urlInput.value.trim().length > 0);
@@ -393,7 +407,7 @@ function initUrlInput() {
   els.downloadBtn.addEventListener('click', startDownload);
 }
 
-// ── Status panel ───────────────────────────────────────────────────────────────
+//  Status panel 
 function setStatus(type, title, detail) {
   els.statusPanel.className = `status-panel${type !== 'idle' ? ` is-${type}` : ''}`;
   els.statusIconWrap.innerHTML = ICONS[type] || ICONS.idle;
@@ -425,7 +439,7 @@ function setProgress(pct, indeterminate = false) {
   }
 }
 
-// ── Download ───────────────────────────────────────────────────────────────────
+//  Download 
 async function startDownload() {
   if (S.downloading) return;
 
@@ -483,7 +497,7 @@ async function startDownload() {
   }
 }
 
-// ── WebSocket + poll fallback ──────────────────────────────────────────────────
+//  WebSocket + poll fallback 
 function connectWS(jobId, url, qId) {
   let ws;
   try { ws = new WebSocket(`${WS_BASE}/ws/${jobId}`); }
@@ -539,7 +553,7 @@ function onJobUpdate(job, url, qId) {
   }
 }
 
-// ── History ────────────────────────────────────────────────────────────────────
+//  History 
 function addHistory(entry) {
   entry.timestamp = Date.now();
   S.history.unshift(entry);
@@ -597,7 +611,7 @@ function exportHistory(format) {
   URL.revokeObjectURL(a.href);
 }
 
-// ── Queue ──────────────────────────────────────────────────────────────────────
+//  Queue 
 let qN = 0;
 
 function addToQueue(url) {
@@ -661,7 +675,7 @@ function finishQueueItem(id, ok, label) {
   }, 5000);
 }
 
-// ── Files ──────────────────────────────────────────────────────────────────────
+//  Files 
 async function loadFiles() {
   els.filesTableBody.innerHTML = '<tr><td colspan="4" class="empty-state">Loading...</td></tr>';
   try {
@@ -736,7 +750,7 @@ function initFileSearch() {
   });
 }
 
-// ── Init ───────────────────────────────────────────────────────────────────────
+//  Init ─
 function init() {
   initNav();
   initUrlInput();

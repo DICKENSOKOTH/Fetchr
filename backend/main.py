@@ -24,7 +24,7 @@ from backend.downloader import (
     DOWNLOAD_DIR
 )
 
-# ── App ───────────────────────────────────────────────────────────────────────
+#  App ─
 app = FastAPI(title="Fetchr", version="1.0.0")
 
 app.add_middleware(
@@ -36,7 +36,7 @@ app.add_middleware(
 
 executor = ThreadPoolExecutor(max_workers=10)
 
-# ── Stores ────────────────────────────────────────────────────────────────────
+#  Stores 
 jobs:       Dict[str, dict] = {}
 scheduled:  Dict[str, dict] = {}   # job_id -> {url, mode, quality, audio_fmt, run_at}
 rate_store: Dict[str, list] = {}
@@ -61,7 +61,7 @@ def clean_old_jobs():
         del jobs[jid]
 
 
-# ── Frontend path ─────────────────────────────────────────────────────────────
+#  Frontend path 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _local   = os.path.join(BASE_DIR, "frontend")
 _parent  = os.path.join(BASE_DIR, "..", "frontend")
@@ -71,7 +71,7 @@ print(f"Frontend  : {FRONTEND_DIR}")
 print(f"Downloads : {DOWNLOAD_DIR}")
 
 
-# ── Background tasks ──────────────────────────────────────────────────────────
+#  Background tasks ─
 @app.on_event("startup")
 async def startup():
     asyncio.create_task(scheduler_loop())
@@ -125,7 +125,7 @@ def _run_ytdlp_update() -> dict:
         return {"status": "error", "message": str(e)}
 
 
-# ── Models ────────────────────────────────────────────────────────────────────
+#  Models 
 class DownloadRequest(BaseModel):
     url:       str
     mode:      str = "video"
@@ -141,7 +141,7 @@ class ScheduleRequest(BaseModel):
     run_at:    float   # Unix timestamp
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+#  Routes 
 
 @app.get("/health")
 def health():
