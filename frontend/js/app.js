@@ -1,7 +1,6 @@
 /* Fetchr — app.js */
 // Get backend URL from Netlify environment variable 
-
-const API = import.meta.env.VITE_API_URL;
+const API = "https://fetchr-7plj.onrender.com";
 
 const originalFetch = window.fetch;
 
@@ -377,7 +376,6 @@ async function cancelScheduled(id) {
 }
 
 //  Server health 
-const API = import.meta.env.VITE_API_URL;
 async function checkServer() {
   try {
     const r = await fetch('/health', { signal: AbortSignal.timeout(3000) });
