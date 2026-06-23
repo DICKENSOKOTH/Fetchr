@@ -41,7 +41,7 @@ jobs:       Dict[str, dict] = {}
 scheduled:  Dict[str, dict] = {}   # job_id -> {url, mode, quality, audio_fmt, run_at}
 rate_store: Dict[str, list] = {}
 
-RATE_LIMIT  = 10
+RATE_LIMIT  = 50
 RATE_WINDOW = 3600
 
 

@@ -377,6 +377,7 @@ async function cancelScheduled(id) {
 }
 
 //  Server health 
+const API = import.meta.env.VITE_API_URL;
 async function checkServer() {
   try {
     const r = await fetch('/health', { signal: AbortSignal.timeout(3000) });
