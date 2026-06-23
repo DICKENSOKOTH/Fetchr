@@ -1,12 +1,12 @@
 #fastapi==0.115.0
 #uvicorn[standard]==0.30.6
-#websockets==13.1
-#yt-dlp==2024.11.18
-#requests==2.32.3
-#beautifulsoup4==4.12.3
-#aiofiles==24.1.0
-#python-multipart==0.0.12
-#url_cffi==0.7.3
+websockets==13.1
+yt-dlp==2024.11.18
+requests==2.32.3
+beautifulsoup4==4.12.3
+aiofiles==24.1.0
+python-multipart==0.0.12
+url_cffi==0.7.3
 
 # Core server
 fastapi==0.115.0
