@@ -11,7 +11,7 @@
 # Core server
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
-
+gunicorn>=23.0
 # Download engine
 # Use nightly yt-dlp — it gets TikTok/YouTube fixes weeks before stable
 yt-dlp @ https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.tar.gz
