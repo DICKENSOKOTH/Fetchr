@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from downloader import (
+from backend.downloader import (
     download, preview_url, get_storage_info,
     DOWNLOAD_DIR
 )
