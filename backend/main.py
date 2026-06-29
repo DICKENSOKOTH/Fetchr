@@ -1,7 +1,5 @@
 """
 main.py — Fetchr Production Server
-Features: async jobs, WebSocket progress, scheduling, storage management,
-          preview, yt-dlp auto-update, rate limiting
 """
 
 import os
@@ -10,21 +8,22 @@ import asyncio
 import time
 import subprocess
 import sys
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from backend.downloader import (
+from downloader import (
     download, preview_url, get_storage_info,
     DOWNLOAD_DIR
 )
 
-#  App ─
+# ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Fetchr", version="1.0.0")
 
 app.add_middleware(
@@ -36,9 +35,8 @@ app.add_middleware(
 
 executor = ThreadPoolExecutor(max_workers=10)
 
-#  Stores 
 jobs:       Dict[str, dict] = {}
-scheduled:  Dict[str, dict] = {}   # job_id -> {url, mode, quality, audio_fmt, run_at}
+scheduled:  Dict[str, dict] = {}
 rate_store: Dict[str, list] = {}
 
 RATE_LIMIT  = 50
@@ -61,7 +59,7 @@ def clean_old_jobs():
         del jobs[jid]
 
 
-#  Frontend path 
+# ── Frontend path ─────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _local   = os.path.join(BASE_DIR, "frontend")
 _parent  = os.path.join(BASE_DIR, "..", "frontend")
@@ -71,7 +69,7 @@ print(f"Frontend  : {FRONTEND_DIR}")
 print(f"Downloads : {DOWNLOAD_DIR}")
 
 
-#  Background tasks ─
+# ── Background tasks ──────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():
     asyncio.create_task(scheduler_loop())
@@ -79,7 +77,6 @@ async def startup():
 
 
 async def scheduler_loop():
-    """Check scheduled downloads every 30 seconds."""
     while True:
         await asyncio.sleep(30)
         now = time.time()
@@ -97,6 +94,7 @@ async def scheduler_loop():
                     "mode":       sched["mode"],
                     "speed":      0,
                     "track_info": "",
+                    "files":      [],
                 }
                 asyncio.get_event_loop().run_in_executor(
                     executor, _run_download,
@@ -106,9 +104,8 @@ async def scheduler_loop():
 
 
 async def auto_update_loop():
-    """Update yt-dlp every 24 hours automatically."""
     while True:
-        await asyncio.sleep(86400)  # 24 hours
+        await asyncio.sleep(86400)
         _run_ytdlp_update()
 
 
@@ -125,7 +122,7 @@ def _run_ytdlp_update() -> dict:
         return {"status": "error", "message": str(e)}
 
 
-#  Models 
+# ── Models ────────────────────────────────────────────────────────────────────
 class DownloadRequest(BaseModel):
     url:       str
     mode:      str = "video"
@@ -138,10 +135,10 @@ class ScheduleRequest(BaseModel):
     mode:      str = "video"
     quality:   str = "best"
     audio_fmt: str = "mp3"
-    run_at:    float   # Unix timestamp
+    run_at:    float
 
 
-#  Routes 
+# ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.get("/health")
 def health():
@@ -159,15 +156,12 @@ def list_files():
 
 @app.get("/storage")
 def storage_info():
-    """Return per-file sizes and total disk usage."""
     return get_storage_info()
 
 
 @app.delete("/files/{filename:path}")
 def delete_file(filename: str):
-    # :path allows slashes in the filename parameter
     safe = os.path.normpath(filename)
-    # Prevent path traversal outside DOWNLOAD_DIR
     path = os.path.abspath(os.path.join(DOWNLOAD_DIR, safe))
     if not path.startswith(os.path.abspath(DOWNLOAD_DIR)):
         raise HTTPException(status_code=400, detail="Invalid path.")
@@ -179,9 +173,58 @@ def delete_file(filename: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.get("/serve/{filepath:path}")
+def serve_file(filepath: str):
+    """
+    Stream a single file to the user's browser then delete it from the server.
+    The file lands on the user's device. Server stays clean.
+    """
+    safe      = os.path.normpath(filepath)
+    full_path = os.path.abspath(os.path.join(DOWNLOAD_DIR, safe))
+
+    if not full_path.startswith(os.path.abspath(DOWNLOAD_DIR)):
+        raise HTTPException(status_code=400, detail="Invalid path.")
+    if not os.path.exists(full_path):
+        raise HTTPException(status_code=404, detail="File not found.")
+
+    filename = os.path.basename(full_path)
+
+    def file_iterator(path: str):
+        """Read file in chunks and delete after fully sent."""
+        try:
+            with open(path, "rb") as f:
+                while True:
+                    chunk = f.read(65536)
+                    if not chunk:
+                        break
+                    yield chunk
+        finally:
+            # Delete file from server after streaming completes or fails
+            try:
+                os.remove(path)
+                # Remove parent folder if it's now empty
+                parent = os.path.dirname(path)
+                if parent != DOWNLOAD_DIR and os.path.isdir(parent):
+                    if not os.listdir(parent):
+                        os.rmdir(parent)
+            except Exception:
+                pass
+
+    encoded_name = urllib.parse.quote(filename)
+    return StreamingResponse(
+        file_iterator(full_path),
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition":       f"attachment; filename*=UTF-8''{encoded_name}",
+            "Content-Length":            str(os.path.getsize(full_path)),
+            "X-Content-Type-Options":    "nosniff",
+        }
+    )
+
+
 @app.get("/preview")
 async def preview(url: str):
-    """Fetch metadata (title, thumbnail, duration) without downloading."""
     try:
         loop   = asyncio.get_event_loop()
         result = await loop.run_in_executor(executor, preview_url, url)
@@ -220,6 +263,7 @@ async def start_download(req: DownloadRequest, request: Request):
             "mode":       mode,
             "speed":      0,
             "track_info": "",
+            "files":      [],
         }
         asyncio.get_event_loop().run_in_executor(
             executor, _run_download, job_id, url, mode, quality, audio_fmt
@@ -232,17 +276,13 @@ async def start_download(req: DownloadRequest, request: Request):
 
 @app.post("/schedule")
 async def schedule_download(req: ScheduleRequest, request: Request):
-    """Schedule a download to run at a future Unix timestamp."""
     ip = request.client.host
     if not check_rate_limit(ip):
         raise HTTPException(status_code=429, detail="Rate limit reached.")
-
     if not req.url.strip().startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="Invalid URL.")
-
     if req.run_at <= time.time():
         raise HTTPException(status_code=400, detail="Scheduled time must be in the future.")
-
     sched_id = str(uuid.uuid4())
     scheduled[sched_id] = {
         "url":       req.url.strip(),
@@ -269,7 +309,6 @@ def cancel_scheduled(sched_id: str):
 
 @app.post("/update-ytdlp")
 async def update_ytdlp():
-    """Manually trigger a yt-dlp update."""
     loop   = asyncio.get_event_loop()
     result = await loop.run_in_executor(executor, _run_ytdlp_update)
     return result
@@ -291,11 +330,9 @@ def _run_download(job_id: str, url: str, mode: str, quality: str, audio_fmt: str
         jobs[job_id]["track_info"] = track_info
 
         if total and downloaded:
-            mb_done  = downloaded / 1_000_000
-            mb_total = total / 1_000_000
-            jobs[job_id]["message"] = f"{mb_done:.1f} / {mb_total:.1f} MB"
+            jobs[job_id]["message"] = f"{downloaded/1_000_000:.1f} / {total/1_000_000:.1f} MB"
         elif downloaded:
-            jobs[job_id]["message"] = f"{downloaded / 1_000_000:.1f} MB"
+            jobs[job_id]["message"] = f"{downloaded/1_000_000:.1f} MB"
 
     try:
         result = download(
@@ -314,6 +351,8 @@ def _run_download(job_id: str, url: str, mode: str, quality: str, audio_fmt: str
                 "type":       result.get("type", mode),
                 "speed":      0,
                 "track_info": "",
+                # List of relative paths ready to serve to browser
+                "files":      result.get("files", []),
             })
         else:
             jobs[job_id].update({
@@ -322,6 +361,7 @@ def _run_download(job_id: str, url: str, mode: str, quality: str, audio_fmt: str
                 "percent":    0,
                 "speed":      0,
                 "track_info": "",
+                "files":      [],
             })
     except Exception as e:
         jobs[job_id].update({
@@ -330,6 +370,7 @@ def _run_download(job_id: str, url: str, mode: str, quality: str, audio_fmt: str
             "percent":    0,
             "speed":      0,
             "track_info": "",
+            "files":      [],
         })
 
 
