@@ -14,24 +14,24 @@ window.fetch = (url, options) => {
 };
 
 //end of fetch override
+
 const WS_PROTO = location.protocol === 'https:' ? 'wss' : 'ws';
 const WS_BASE  = `${WS_PROTO}://${location.host}`;
 
-// ── State ──────────────────────────────────────────────────────────────────────
 const S = {
-  history:      JSON.parse(localStorage.getItem('fetchr_history') || '[]'),
-  presets:      JSON.parse(localStorage.getItem('fetchr_presets') || '{}'),
-  allFiles:     [],
-  storageData:  [],
-  socket:       null,
-  downloading:  false,
-  mode:         'video',
-  quality:      '1080p',
-  audioFmt:     'mp3',
-  notifEnabled: false,
+  history:         JSON.parse(localStorage.getItem('fetchr_history') || '[]'),
+  presets:         JSON.parse(localStorage.getItem('fetchr_presets') || '{}'),
+  allFiles:        [],
+  storageData:     [],
+  socket:          null,
+  downloading:     false,
+  mode:            'video',
+  quality:         '1080p',
+  audioFmt:        'mp3',
+  notifEnabled:    false,
+  downloadWindows: {},
 };
 
-// ── DOM ────────────────────────────────────────────────────────────────────────
 const el  = (id) => document.getElementById(id);
 const els = {
   urlInput:          el('urlInput'),
@@ -80,7 +80,6 @@ const els = {
   blockAudio:        el('blockAudio'),
 };
 
-// ── Icons ──────────────────────────────────────────────────────────────────────
 const ICONS = {
   idle:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>`,
   loading: `<svg class="spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>`,
@@ -95,14 +94,13 @@ const V_LABEL = { best:'Best available','4k':'4K','1440p':'1440p','1080p':'1080p
 const V_CONT  = { best:'MP4','4k':'MKV','1440p':'MKV','1080p':'MP4','720p':'MP4' };
 const A_LABEL = { mp3:'MP3 · 320kbps',flac:'FLAC · Lossless',wav:'WAV · Lossless',opus:'Opus · HQ',aac:'AAC · HQ',alac:'ALAC · Apple Lossless' };
 
-// ── Utility ────────────────────────────────────────────────────────────────────
 function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 function fmtBytes(b) {
-  if (b < 1024)      return `${b} B`;
-  if (b < 1024**2)   return `${(b/1024).toFixed(1)} KB`;
-  if (b < 1024**3)   return `${(b/1024**2).toFixed(1)} MB`;
+  if (b < 1024)    return `${b} B`;
+  if (b < 1024**2) return `${(b/1024).toFixed(1)} KB`;
+  if (b < 1024**3) return `${(b/1024**2).toFixed(1)} MB`;
   return `${(b/1024**3).toFixed(2)} GB`;
 }
 function fmtSpeed(bps) {
@@ -116,23 +114,56 @@ function fmtDuration(secs) {
   return `${m}:${String(s).padStart(2,'0')}`;
 }
 
-// ── Auto-trigger browser download ──────────────────────────────────────────────
-function triggerBrowserDownload(filepath) {
-  const a    = document.createElement('a');
-  a.href     = `/serve/${encodeURIComponent(filepath)}`;
+// ── Pre-opened tab: shown while server processes ───────────────────────────────
+// Opened synchronously inside the click handler so mobile browsers (iOS Safari)
+// trust the eventual file navigation as user-gesture-triggered.
+const PREPARING_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>Preparing download…</title>
+<style>
+  body{font-family:-apple-system,sans-serif;background:#0c0c0e;color:#f0f0f5;
+       display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center}
+  .spinner{width:32px;height:32px;border:3px solid #2a2a35;border-top-color:#e8ff47;
+           border-radius:50%;margin:0 auto 16px;animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  p{margin:6px 0}.sub{opacity:.5;font-size:13px}
+</style></head>
+<body><div><div class="spinner"></div>
+<p>Preparing your download…</p>
+<p class="sub">This tab will receive your file automatically.</p>
+</div></body></html>`;
+
+function openPreparingWindow() {
+  const w = window.open('', '_blank');
+  if (w) { try { w.document.write(PREPARING_HTML); } catch {} }
+  return w;
+}
+function showWindowDone(win) {
+  if (!win || win.closed) return;
+  try {
+    win.document.body.innerHTML =
+      '<div style="text-align:center;font-family:-apple-system,sans-serif;color:#f0f0f5">' +
+      '<p style="color:#3dffa0;font-size:18px;margin-bottom:8px">File saved to your device</p>' +
+      '<p style="opacity:.6;font-size:13px">You can close this tab.</p></div>';
+  } catch {}
+}
+function showWindowError(win, msg) {
+  if (!win || win.closed) return;
+  try {
+    win.document.body.innerHTML =
+      '<div style="text-align:center;font-family:-apple-system,sans-serif;color:#f0f0f5">' +
+      '<p style="color:#ff4f4f;font-size:18px;margin-bottom:8px">Download failed</p>' +
+      `<p style="opacity:.6;font-size:13px">${esc(msg||'Unknown error')}</p></div>`;
+  } catch {}
+}
+function fallbackTriggerDownload(jobId) {
+  // Best-effort fallback when popup was blocked
+  const a = document.createElement('a');
+  a.href  = `/serve-job/${jobId}`;
   a.download = '';
   a.style.display = 'none';
   document.body.appendChild(a);
   a.click();
   setTimeout(() => document.body.removeChild(a), 2000);
-}
-
-function triggerAllDownloads(files) {
-  if (!files || files.length === 0) return;
-  // Stagger multiple files so the browser doesn't block them
-  files.forEach((filepath, i) => {
-    setTimeout(() => triggerBrowserDownload(filepath), i * 1200);
-  });
 }
 
 // ── Navigation ─────────────────────────────────────────────────────────────────
@@ -143,9 +174,8 @@ function initNav() {
       document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
       btn.classList.add('active');
       el(`view-${btn.dataset.view}`)?.classList.add('active');
-      const v = btn.dataset.view;
-      if (v === 'files')     loadFiles();
-      if (v === 'scheduled') loadScheduled();
+      if (btn.dataset.view === 'files')     loadFiles();
+      if (btn.dataset.view === 'scheduled') loadScheduled();
     });
   });
 }
@@ -161,16 +191,12 @@ function setMode(mode) {
 }
 function setVideoQuality(val) {
   S.quality = val;
-  ['best','4k','1440p','1080p','720p'].forEach((v) =>
-    el(`q-${v}`)?.classList.toggle('active', v === val)
-  );
+  ['best','4k','1440p','1080p','720p'].forEach((v) => el(`q-${v}`)?.classList.toggle('active', v === val));
   updateSummary();
 }
 function setAudioFmt(fmt) {
   S.audioFmt = fmt;
-  ['mp3','flac','wav','opus','aac','alac'].forEach((f) =>
-    el(`a-${f}`)?.classList.toggle('active', f === fmt)
-  );
+  ['mp3','flac','wav','opus','aac','alac'].forEach((f) => el(`a-${f}`)?.classList.toggle('active', f === fmt));
   updateSummary();
 }
 function updateSummary() {
@@ -215,23 +241,19 @@ function initPresets() {
     if (!name) return;
     S.presets[name] = { mode: S.mode, quality: S.quality, audioFmt: S.audioFmt };
     localStorage.setItem('fetchr_presets', JSON.stringify(S.presets));
-    renderPresets();
-    els.presetSelect.value = name;
+    renderPresets(); els.presetSelect.value = name;
   };
   els.deletePresetBtn.onclick = () => {
-    const name = els.presetSelect.value;
-    if (!name) return;
+    const name = els.presetSelect.value; if (!name) return;
     delete S.presets[name];
     localStorage.setItem('fetchr_presets', JSON.stringify(S.presets));
     renderPresets();
   };
   els.presetSelect.onchange = () => {
-    const name = els.presetSelect.value;
-    if (!name || !S.presets[name]) return;
+    const name = els.presetSelect.value; if (!name || !S.presets[name]) return;
     const p = S.presets[name];
     setMode(p.mode);
-    if (p.mode === 'video') setVideoQuality(p.quality);
-    else setAudioFmt(p.audioFmt);
+    if (p.mode === 'video') setVideoQuality(p.quality); else setAudioFmt(p.audioFmt);
   };
 }
 
@@ -240,18 +262,16 @@ function initNotifications() {
   updateNotifBtn();
   els.notifBtn.onclick = async () => {
     if (!('Notification' in window)) { alert('Browser does not support notifications.'); return; }
-    if (Notification.permission === 'granted') {
-      S.notifEnabled = !S.notifEnabled;
-    } else if (Notification.permission !== 'denied') {
-      const perm = await Notification.requestPermission();
-      S.notifEnabled = perm === 'granted';
+    if (Notification.permission === 'granted') { S.notifEnabled = !S.notifEnabled; }
+    else if (Notification.permission !== 'denied') {
+      S.notifEnabled = (await Notification.requestPermission()) === 'granted';
     }
     updateNotifBtn();
   };
 }
 function updateNotifBtn() {
   const on = S.notifEnabled && Notification.permission === 'granted';
-  els.notifBtn.classList.toggle('notif-on',  on);
+  els.notifBtn.classList.toggle('notif-on', on);
   els.notifBtn.classList.toggle('notif-off', !on);
 }
 function sendNotification(title, body) {
@@ -262,26 +282,22 @@ function sendNotification(title, body) {
 // ── Preview ────────────────────────────────────────────────────────────────────
 function initPreview() {
   els.inspectBtn.onclick = async () => {
-    const url = els.urlInput.value.trim();
-    if (!url) return;
+    const url = els.urlInput.value.trim(); if (!url) return;
     els.inspectBtn.disabled = true;
     try {
       const res  = await fetch(`/preview?url=${encodeURIComponent(url)}`);
       if (!res.ok) throw new Error('Could not fetch preview');
       const data = await res.json();
-      els.previewThumb.src          = data.thumbnail || '';
-      els.previewTitle.textContent  = data.title || url;
+      els.previewThumb.src         = data.thumbnail || '';
+      els.previewTitle.textContent = data.title || url;
       const parts = [];
       if (data.uploader)    parts.push(data.uploader);
       if (data.duration)    parts.push(fmtDuration(data.duration));
       if (data.is_playlist) parts.push(`${data.count} tracks`);
       els.previewMeta.textContent = parts.join(' · ');
       els.previewPanel.classList.remove('hidden');
-    } catch {
-      els.previewPanel.classList.add('hidden');
-    } finally {
-      els.inspectBtn.disabled = false;
-    }
+    } catch { els.previewPanel.classList.add('hidden'); }
+    finally  { els.inspectBtn.disabled = false; }
   };
   els.previewClose.onclick = () => els.previewPanel.classList.add('hidden');
 }
@@ -289,79 +305,59 @@ function initPreview() {
 // ── yt-dlp update ──────────────────────────────────────────────────────────────
 function initUpdateBtn() {
   els.updateBtn.onclick = async () => {
-    els.updateBtn.disabled  = true;
-    els.updateBtn.textContent = 'Updating...';
+    els.updateBtn.disabled = true; els.updateBtn.textContent = 'Updating...';
     try {
-      const res  = await fetch('/update-ytdlp', { method: 'POST' });
-      const data = await res.json();
+      const data = await fetch('/update-ytdlp', { method: 'POST' }).then((r) => r.json());
       els.updateBtn.textContent = data.status === 'ok' ? 'Updated!' : 'Failed';
-      setTimeout(() => {
-        els.updateBtn.innerHTML  = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> Update yt-dlp`;
-        els.updateBtn.disabled = false;
-      }, 3000);
-    } catch {
-      els.updateBtn.textContent = 'Error';
-      setTimeout(() => { els.updateBtn.disabled = false; }, 2000);
-    }
+    } catch { els.updateBtn.textContent = 'Error'; }
+    setTimeout(() => {
+      els.updateBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> Update yt-dlp`;
+      els.updateBtn.disabled = false;
+    }, 3000);
   };
 }
 
 // ── Schedule ───────────────────────────────────────────────────────────────────
 function initSchedule() {
   els.scheduleBtn.onclick = async () => {
-    const url = els.urlInput.value.trim();
-    const dt  = els.scheduleInput.value;
+    const url = els.urlInput.value.trim(), dt = els.scheduleInput.value;
     if (!url || !dt) { alert('Enter a URL and pick a date/time.'); return; }
     const runAt = new Date(dt).getTime() / 1000;
     if (runAt <= Date.now() / 1000) { alert('Time must be in the future.'); return; }
     const res = await fetch('/schedule', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url, run_at: runAt, mode: S.mode, quality: S.quality, audio_fmt: S.audioFmt }),
     });
-    if (res.ok) {
-      els.scheduleInput.value = '';
-      alert(`Scheduled for ${new Date(runAt * 1000).toLocaleString()}`);
-      loadScheduled();
-    } else {
-      const err = await res.json().catch(() => ({}));
-      alert(err.detail || 'Failed to schedule.');
-    }
+    if (res.ok) { els.scheduleInput.value = ''; alert(`Scheduled for ${new Date(runAt*1000).toLocaleString()}`); loadScheduled(); }
+    else { const e = await res.json().catch(() => ({})); alert(e.detail || 'Failed to schedule.'); }
   };
   els.clearScheduleBtn.onclick = () => { els.scheduleInput.value = ''; };
 }
 
 async function loadScheduled() {
   try {
-    const res  = await fetch('/scheduled');
-    const data = await res.json();
+    const data = await fetch('/scheduled').then((r) => r.json());
     renderScheduled(data.scheduled || {});
-  } catch {
-    els.scheduledList.innerHTML = '<div class="empty-state">Could not load scheduled downloads</div>';
-  }
+  } catch { els.scheduledList.innerHTML = '<div class="empty-state">Could not load</div>'; }
 }
-
 function renderScheduled(scheduled) {
   const entries = Object.entries(scheduled);
   if (!entries.length) {
-    els.scheduledList.innerHTML = `
-      <div class="empty-state-block">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
-        <p>No scheduled downloads</p>
-      </div>`;
+    els.scheduledList.innerHTML = `<div class="empty-state-block">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+      <p>No scheduled downloads</p></div>`;
     return;
   }
   els.scheduledList.innerHTML = entries.map(([id, s]) => `
     <div class="sched-item">
       <div class="sched-item-info">
         <p class="sched-item-url">${esc(s.url)}</p>
-        <p class="sched-item-time">${new Date(s.run_at * 1000).toLocaleString()}</p>
-        <p class="sched-item-fmt">${s.mode === 'audio' ? s.audio_fmt.toUpperCase() : s.quality + ' ' + s.mode}</p>
+        <p class="sched-item-time">${new Date(s.run_at*1000).toLocaleString()}</p>
+        <p class="sched-item-fmt">${s.mode==='audio' ? s.audio_fmt.toUpperCase() : s.quality+' '+s.mode}</p>
       </div>
       <button class="delete-btn" onclick="cancelScheduled('${id}')">Cancel</button>
     </div>`).join('');
 }
-
 async function cancelScheduled(id) {
   await fetch(`/scheduled/${id}`, { method: 'DELETE' });
   loadScheduled();
@@ -371,14 +367,9 @@ async function cancelScheduled(id) {
 async function checkServer() {
   try {
     const r = await fetch('/health', { signal: AbortSignal.timeout(3000) });
-    if (r.ok) {
-      els.serverDot.className    = 'status-dot online';
-      els.serverLabel.textContent = 'Server online';
-      return true;
-    }
-  } catch { /* ignore */ }
-  els.serverDot.className    = 'status-dot offline';
-  els.serverLabel.textContent = 'Server offline';
+    if (r.ok) { els.serverDot.className = 'status-dot online'; els.serverLabel.textContent = 'Server online'; return true; }
+  } catch {}
+  els.serverDot.className = 'status-dot offline'; els.serverLabel.textContent = 'Server offline';
   return false;
 }
 
@@ -389,10 +380,8 @@ function initUrlInput() {
     els.previewPanel.classList.add('hidden');
   });
   els.clearBtn.addEventListener('click', () => {
-    els.urlInput.value = '';
-    els.clearBtn.classList.remove('visible');
-    els.previewPanel.classList.add('hidden');
-    els.urlInput.focus();
+    els.urlInput.value = ''; els.clearBtn.classList.remove('visible');
+    els.previewPanel.classList.add('hidden'); els.urlInput.focus();
   });
   els.urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') startDownload(); });
   els.downloadBtn.addEventListener('click', startDownload);
@@ -408,79 +397,65 @@ function setStatus(type, title, detail) {
 function showProgress(show) {
   els.progressWrap.style.display = show ? 'block' : 'none';
   if (!show) {
-    els.progressBar.className        = 'progress-bar';
-    els.progressBar.style.width      = '0%';
-    els.progressBar.style.background = '';
-    els.progressPct.textContent      = '';
-    els.speedBadge.textContent       = '';
+    els.progressBar.className = 'progress-bar'; els.progressBar.style.width = '0%';
+    els.progressBar.style.background = ''; els.progressPct.textContent = ''; els.speedBadge.textContent = '';
   }
 }
 function setProgress(pct, indeterminate = false) {
   els.progressWrap.style.display = 'block';
-  if (indeterminate) {
-    els.progressBar.className   = 'progress-bar indeterminate';
-    els.progressBar.style.width = '';
-    els.progressPct.textContent = '';
-  } else {
-    els.progressBar.className   = 'progress-bar';
-    els.progressBar.style.width = `${Math.min(pct, 100)}%`;
-    els.progressPct.textContent = `${Math.round(pct)}%`;
-  }
+  if (indeterminate) { els.progressBar.className = 'progress-bar indeterminate'; els.progressBar.style.width = ''; els.progressPct.textContent = ''; }
+  else { els.progressBar.className = 'progress-bar'; els.progressBar.style.width = `${Math.min(pct,100)}%`; els.progressPct.textContent = `${Math.round(pct)}%`; }
 }
 
 // ── Download ───────────────────────────────────────────────────────────────────
 async function startDownload() {
   if (S.downloading) return;
-  const raw  = els.urlInput.value.trim();
+  const raw = els.urlInput.value.trim();
   if (!raw) { els.urlInput.focus(); return; }
   const urls = raw.split(',').map((u) => u.trim()).filter(Boolean);
   for (const u of urls) {
     if (!u.startsWith('http://') && !u.startsWith('https://')) {
-      setStatus('error', 'Invalid URL', `Not a valid URL: ${u}`);
-      return;
+      setStatus('error', 'Invalid URL', `Not a valid URL: ${u}`); return;
     }
   }
-
   if (S.socket) { S.socket.close(); S.socket = null; }
 
-  S.downloading            = true;
-  els.downloadBtn.disabled = true;
+  // Open one tab per URL NOW — synchronously inside the click handler.
+  // This is the critical step that satisfies iOS Safari's user-gesture check.
+  // Without this, the eventual window.location.href assignment (after the async
+  // server processing) would be blocked as an untrusted popup.
+  const preOpened = urls.map(() => openPreparingWindow());
+
+  S.downloading = true; els.downloadBtn.disabled = true;
   setStatus('loading', 'Starting...', urls.length > 1 ? `${urls.length} URLs` : urls[0]);
   setProgress(0, true);
 
   try {
     const res = await fetch('/download', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: raw, mode: S.mode, quality: S.quality, audio_fmt: S.audioFmt }),
     });
-
     if (res.status === 429) throw new Error('Rate limit reached. Please wait.');
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || `Server error ${res.status}`);
-    }
+    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.detail || `Server error ${res.status}`); }
 
     const data   = await res.json();
     const jobIds = data.job_ids || (data.job_id ? [data.job_id] : []);
     if (!jobIds.length) throw new Error('No jobs returned from server');
 
     jobIds.forEach((jobId, i) => {
+      S.downloadWindows[jobId] = preOpened[i] || null;
       const qId = addToQueue(urls[i] || jobId);
       setTimeout(() => connectWS(jobId, urls[i] || jobId, qId), i * 200);
     });
 
     if (jobIds.length > 1) {
       setStatus('loading', `Downloading ${jobIds.length} items`, 'See queue for individual progress');
-      S.downloading            = false;
-      els.downloadBtn.disabled = false;
+      S.downloading = false; els.downloadBtn.disabled = false;
     }
-
   } catch (err) {
+    preOpened.forEach((w) => { try { w && w.close(); } catch {} });
     setStatus('error', 'Failed', err.message);
-    showProgress(false);
-    S.downloading            = false;
-    els.downloadBtn.disabled = false;
+    showProgress(false); S.downloading = false; els.downloadBtn.disabled = false;
     checkServer();
   }
 }
@@ -488,14 +463,12 @@ async function startDownload() {
 // ── WebSocket + poll fallback ──────────────────────────────────────────────────
 function connectWS(jobId, url, qId) {
   let ws;
-  try { ws = new WebSocket(`${WS_BASE}/ws/${jobId}`); }
-  catch { poll(jobId, url, qId); return; }
+  try { ws = new WebSocket(`${WS_BASE}/ws/${jobId}`); } catch { poll(jobId, url, qId); return; }
   S.socket     = ws;
-  ws.onmessage = (e) => { try { onJobUpdate(JSON.parse(e.data), url, qId); } catch {} };
+  ws.onmessage = (e) => { try { onJobUpdate(JSON.parse(e.data), url, qId, jobId); } catch {} };
   ws.onerror   = ()  => { ws.close(); poll(jobId, url, qId); };
   ws.onclose   = ()  => { S.socket = null; };
 }
-
 function poll(jobId, url, qId) {
   const iv = setInterval(async () => {
     try {
@@ -503,273 +476,189 @@ function poll(jobId, url, qId) {
       if (!r.ok) { clearInterval(iv); return; }
       const job = await r.json();
       if (job.status === 'error' && job.message === 'Job not found') { clearInterval(iv); return; }
-      onJobUpdate(job, url, qId);
+      onJobUpdate(job, url, qId, jobId);
       if (job.status === 'done' || job.status === 'error') clearInterval(iv);
     } catch { clearInterval(iv); }
   }, 800);
 }
 
-function onJobUpdate(job, url, qId) {
+function onJobUpdate(job, url, qId, jobId) {
   if (job.status === 'downloading' || job.status === 'queued') {
     setStatus('loading', 'Downloading', job.message || '');
     els.speedBadge.textContent = fmtSpeed(job.speed);
     job.percent > 0 ? setProgress(job.percent) : setProgress(0, true);
-    updateQueueProgress(qId, job.percent || 0, job.message || '', job.speed || 0, job.track_info || '');
+    updateQueueProgress(qId, job.percent||0, job.message||'', job.speed||0, job.track_info||'');
 
   } else if (job.status === 'done') {
     setStatus('done', 'Download complete', job.title || url);
     els.speedBadge.textContent = '';
-    setProgress(100);
-    setTimeout(() => showProgress(false), 1500);
-    addHistory({ url, title: job.title || url, status: 'done', type: job.type || S.mode });
+    setProgress(100); setTimeout(() => showProgress(false), 1500);
+    addHistory({ url, title: job.title||url, status:'done', type: job.type||S.mode });
     finishQueueItem(qId, true, job.title);
     sendNotification('Download complete', job.title || url);
 
-    // Auto-send files to user's browser — no manual step needed
-    if (job.files && job.files.length > 0) {
-      triggerAllDownloads(job.files);
+    // Redirect the pre-opened tab to the file endpoint.
+    // Because the tab was opened synchronously in the click handler, this
+    // navigation is trusted by the browser and triggers the native file download.
+    const win = S.downloadWindows[jobId];
+    if (win && !win.closed) {
+      try {
+        win.location.href = `/serve-job/${jobId}`;
+        setTimeout(() => showWindowDone(win), 1200);
+      } catch { fallbackTriggerDownload(jobId); }
+    } else {
+      fallbackTriggerDownload(jobId);
     }
+    delete S.downloadWindows[jobId];
 
-    S.downloading            = false;
-    els.downloadBtn.disabled = false;
+    S.downloading = false; els.downloadBtn.disabled = false;
 
   } else if (job.status === 'error') {
     setStatus('error', 'Download failed', job.message || 'Unknown error');
-    els.speedBadge.textContent       = '';
+    els.speedBadge.textContent = '';
     els.progressBar.style.background = 'var(--red)';
-    setProgress(100);
-    setTimeout(() => showProgress(false), 2000);
-    addHistory({ url, title: url, status: 'error', type: 'error' });
+    setProgress(100); setTimeout(() => showProgress(false), 2000);
+    addHistory({ url, title: url, status:'error', type:'error' });
     finishQueueItem(qId, false, job.message);
     sendNotification('Download failed', job.message || url);
-    S.downloading            = false;
-    els.downloadBtn.disabled = false;
+    showWindowError(S.downloadWindows[jobId], job.message);
+    delete S.downloadWindows[jobId];
+    S.downloading = false; els.downloadBtn.disabled = false;
   }
 }
 
 // ── History ────────────────────────────────────────────────────────────────────
 function addHistory(entry) {
-  entry.timestamp = Date.now();
-  S.history.unshift(entry);
+  entry.timestamp = Date.now(); S.history.unshift(entry);
   if (S.history.length > 50) S.history = S.history.slice(0, 50);
   localStorage.setItem('fetchr_history', JSON.stringify(S.history));
   renderHistory();
 }
-
 function renderHistory() {
-  if (!S.history.length) {
-    els.recentList.innerHTML = '<li class="empty-state">No downloads yet</li>';
-    return;
-  }
+  if (!S.history.length) { els.recentList.innerHTML = '<li class="empty-state">No downloads yet</li>'; return; }
   els.recentList.innerHTML = S.history.slice(0, 8).map((e) => {
-    const isV   = e.type === 'video', isA = e.type === 'audio', isErr = e.status === 'error';
-    const cls   = isV ? 'type-video' : isA ? 'type-audio' : isErr ? 'type-error' : 'type-file';
-    const ico   = isV ? ICONS.video  : isA ? ICONS.audio  : isErr ? ICONS.error  : ICONS.file;
-    const badge = e.status === 'done'
+    const isV = e.type==='video', isA = e.type==='audio', isErr = e.status==='error';
+    const cls = isV?'type-video':isA?'type-audio':isErr?'type-error':'type-file';
+    const ico = isV?ICONS.video:isA?ICONS.audio:isErr?ICONS.error:ICONS.file;
+    const badge = e.status==='done'
       ? '<span class="recent-item-badge done">Done</span>'
       : '<span class="recent-item-badge error">Failed</span>';
-    const su = e.url.length > 60 ? e.url.slice(0, 60) + '...' : e.url;
-    return `<li class="recent-item">
-      <div class="recent-item-icon ${cls}">${ico}</div>
-      <div class="recent-item-info">
-        <p class="recent-item-title">${esc(e.title)}</p>
-        <p class="recent-item-url">${esc(su)}</p>
-      </div>${badge}</li>`;
+    const su = e.url.length>60 ? e.url.slice(0,60)+'...' : e.url;
+    return `<li class="recent-item"><div class="recent-item-icon ${cls}">${ico}</div>
+      <div class="recent-item-info"><p class="recent-item-title">${esc(e.title)}</p>
+      <p class="recent-item-url">${esc(su)}</p></div>${badge}</li>`;
   }).join('');
 }
-
 function exportHistory(format) {
   if (!S.history.length) { alert('No history to export.'); return; }
   let content, mime, ext;
   if (format === 'csv') {
     const rows = [['Title','URL','Status','Type','Date']];
-    S.history.forEach((e) => rows.push([
-      `"${(e.title||'').replace(/"/g,'""')}"`,
-      `"${(e.url||'').replace(/"/g,'""')}"`,
-      e.status, e.type||'',
-      new Date(e.timestamp||0).toISOString(),
-    ]));
-    content = rows.map((r) => r.join(',')).join('\n');
-    mime = 'text/csv'; ext = 'csv';
-  } else {
-    content = JSON.stringify(S.history, null, 2);
-    mime = 'application/json'; ext = 'json';
-  }
-  const blob = new Blob([content], { type: mime });
-  const a    = document.createElement('a');
-  a.href     = URL.createObjectURL(blob);
-  a.download = `fetchr-history.${ext}`;
-  a.click();
+    S.history.forEach((e) => rows.push([`"${(e.title||'').replace(/"/g,'""')}"`,`"${(e.url||'').replace(/"/g,'""')}"`,e.status,e.type||'',new Date(e.timestamp||0).toISOString()]));
+    content = rows.map((r) => r.join(',')).join('\n'); mime='text/csv'; ext='csv';
+  } else { content = JSON.stringify(S.history,null,2); mime='application/json'; ext='json'; }
+  const blob=new Blob([content],{type:mime}), a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download=`fetchr-history.${ext}`; a.click();
   URL.revokeObjectURL(a.href);
 }
 
 // ── Queue ──────────────────────────────────────────────────────────────────────
 let qN = 0;
-
 function addToQueue(url) {
-  const id = ++qN;
-  const sh = url.length > 52 ? url.slice(0, 52) + '...' : url;
+  const id = ++qN, sh = url.length>52?url.slice(0,52)+'...':url;
   el('queueList').querySelector('.empty-state-block')?.remove();
   const d = document.createElement('div');
-  d.className = 'queue-item'; d.id = `qi-${id}`;
-  d.innerHTML = `
-    <div class="queue-item-header">
-      <span class="queue-item-name">${esc(sh)}</span>
-      <span class="queue-item-pct" id="qp-${id}">Queued</span>
-    </div>
-    <div class="queue-item-meta">
-      <span class="queue-item-track" id="qt-${id}"></span>
-      <span class="queue-item-speed" id="qspd-${id}"></span>
-    </div>
+  d.className='queue-item'; d.id=`qi-${id}`;
+  d.innerHTML=`<div class="queue-item-header"><span class="queue-item-name">${esc(sh)}</span><span class="queue-item-pct" id="qp-${id}">Queued</span></div>
+    <div class="queue-item-meta"><span class="queue-item-track" id="qt-${id}"></span><span class="queue-item-speed" id="qspd-${id}"></span></div>
     <div class="queue-item-msg" id="qm-${id}"></div>
     <div class="queue-item-progress"><div class="queue-item-bar indeterminate" id="qb-${id}"></div></div>`;
-  els.queueList.prepend(d);
-  return id;
+  els.queueList.prepend(d); return id;
 }
-
 function updateQueueProgress(id, pct, msg, speed, trackInfo) {
-  const p = el(`qp-${id}`), b = el(`qb-${id}`), m = el(`qm-${id}`);
-  const t = el(`qt-${id}`), spd = el(`qspd-${id}`);
+  const p=el(`qp-${id}`),b=el(`qb-${id}`),m=el(`qm-${id}`),t=el(`qt-${id}`),spd=el(`qspd-${id}`);
   if (!p) return;
-  p.textContent   = pct > 0 ? `${Math.round(pct)}%` : 'Downloading';
-  if (m)   m.textContent   = msg || '';
-  if (t)   t.textContent   = trackInfo || '';
-  if (spd) spd.textContent = fmtSpeed(speed);
-  if (pct > 0) { b.className = 'queue-item-bar'; b.style.width = `${Math.min(pct,100)}%`; }
-  else b.className = 'queue-item-bar indeterminate';
+  p.textContent=pct>0?`${Math.round(pct)}%`:'Downloading';
+  if(m)m.textContent=msg||''; if(t)t.textContent=trackInfo||''; if(spd)spd.textContent=fmtSpeed(speed);
+  if(pct>0){b.className='queue-item-bar';b.style.width=`${Math.min(pct,100)}%`;}else b.className='queue-item-bar indeterminate';
 }
-
 function finishQueueItem(id, ok, label) {
-  const p = el(`qp-${id}`), b = el(`qb-${id}`), m = el(`qm-${id}`);
-  const t = el(`qt-${id}`), spd = el(`qspd-${id}`);
-  if (!p) return;
-  p.textContent      = ok ? 'Done' : 'Failed';
-  p.style.color      = `var(--${ok ? 'green' : 'red'})`;
-  b.className        = 'queue-item-bar';
-  b.style.width      = '100%';
-  b.style.background = `var(--${ok ? 'green' : 'red'})`;
-  if (m && label) m.textContent = label;
-  if (t)   t.textContent = '';
-  if (spd) spd.textContent = '';
-
-  setTimeout(() => {
+  const p=el(`qp-${id}`),b=el(`qb-${id}`),m=el(`qm-${id}`),t=el(`qt-${id}`),spd=el(`qspd-${id}`);
+  if(!p)return;
+  p.textContent=ok?'Done':'Failed'; p.style.color=`var(--${ok?'green':'red'})`;
+  b.className='queue-item-bar'; b.style.width='100%'; b.style.background=`var(--${ok?'green':'red'})`;
+  if(m&&label)m.textContent=label; if(t)t.textContent=''; if(spd)spd.textContent='';
+  setTimeout(()=>{
     el(`qi-${id}`)?.remove();
-    if (!els.queueList.querySelector('.queue-item')) {
-      els.queueList.innerHTML = `
-        <div class="empty-state-block">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-          <p>Queue is empty</p>
-        </div>`;
+    if(!els.queueList.querySelector('.queue-item')){
+      els.queueList.innerHTML=`<div class="empty-state-block">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        <p>Queue is empty</p></div>`;
     }
-  }, 5000);
+  },5000);
 }
 
 // ── Files ──────────────────────────────────────────────────────────────────────
 async function loadFiles() {
-  els.filesTableBody.innerHTML = '<tr><td colspan="4" class="empty-state">Loading...</td></tr>';
+  els.filesTableBody.innerHTML='<tr><td colspan="4" class="empty-state">Loading...</td></tr>';
   try {
-    const data = await fetch('/storage').then((r) => r.json());
-    S.storageData = data.files || [];
-    els.folderPath.textContent = data.folder || '';
-    renderStorage(data);
-    renderFiles(S.storageData);
-  } catch {
-    els.filesTableBody.innerHTML = '<tr><td colspan="4" class="empty-state">Could not reach server</td></tr>';
-  }
+    const data=await fetch('/storage').then((r)=>r.json());
+    S.storageData=data.files||[]; els.folderPath.textContent=data.folder||'';
+    renderStorage(data); renderFiles(S.storageData);
+  } catch { els.filesTableBody.innerHTML='<tr><td colspan="4" class="empty-state">Could not reach server</td></tr>'; }
 }
-
 function renderStorage(data) {
-  const used  = data.total_bytes || 0;
-  const total = data.disk_total  || 1;
-  const free  = data.disk_free   || 0;
-  const pct   = Math.min(used / total * 100, 100);
-  els.storageBarFill.style.width = `${pct}%`;
-  els.storageLabel.textContent   = `${fmtBytes(used)} used · ${fmtBytes(free)} free`;
-  if (pct > 85) els.storageBarFill.style.background = 'var(--red)';
-  else if (pct > 65) els.storageBarFill.style.background = 'var(--accent)';
-  else els.storageBarFill.style.background = '';
+  const used=data.total_bytes||0,total=data.disk_total||1,free=data.disk_free||0,pct=Math.min(used/total*100,100);
+  els.storageBarFill.style.width=`${pct}%`;
+  els.storageLabel.textContent=`${fmtBytes(used)} used · ${fmtBytes(free)} free`;
+  els.storageBarFill.style.background=pct>85?'var(--red)':pct>65?'var(--accent)':'';
 }
-
 function fileType(ext) {
-  if (['mp4','mkv','webm','avi','mov','flv','wmv'].includes(ext))               return 'video';
-  if (['mp3','flac','wav','opus','aac','m4a','ogg','alac'].includes(ext))       return 'audio';
-  if (['jpg','jpeg','png','gif','webp','svg','bmp'].includes(ext))              return 'image';
-  if (['pdf','docx','xlsx','pptx','txt','html','zip','rar','epub'].includes(ext)) return 'doc';
-  return 'other';
+  if(['mp4','mkv','webm','avi','mov','flv','wmv'].includes(ext))return'video';
+  if(['mp3','flac','wav','opus','aac','m4a','ogg','alac'].includes(ext))return'audio';
+  if(['jpg','jpeg','png','gif','webp','svg','bmp'].includes(ext))return'image';
+  if(['pdf','docx','xlsx','pptx','txt','html','zip','rar','epub'].includes(ext))return'doc';
+  return'other';
 }
-
 function renderFiles(files) {
-  els.fileCount.textContent = `${files.length} file${files.length !== 1 ? 's' : ''}`;
-  if (!files.length) {
-    els.filesTableBody.innerHTML = '<tr><td colspan="4" class="empty-state">No files yet</td></tr>';
-    return;
-  }
-  els.filesTableBody.innerHTML = files.map((f) => {
-    const name  = f.name || f;
-    const size  = f.size != null ? fmtBytes(f.size) : '';
-    const parts = name.split('.');
-    const ext   = parts.length > 1 ? parts.pop().toLowerCase() : '';
-    const type  = fileType(ext);
-    return `
-      <tr>
-        <td class="filename">${esc(name)}</td>
-        <td><span class="type-badge ${type}">${type}</span></td>
-        <td class="size-cell">${size}</td>
-        <td>
-          <a class="download-btn" href="/serve/${encodeURIComponent(name)}" download>Save</a>
-          <button class="delete-btn" onclick="deleteFile('${esc(name)}')">Delete</button>
-        </td>
-      </tr>`;
+  els.fileCount.textContent=`${files.length} file${files.length!==1?'s':''}`;
+  if(!files.length){els.filesTableBody.innerHTML='<tr><td colspan="4" class="empty-state">No files yet</td></tr>';return;}
+  els.filesTableBody.innerHTML=files.map((f)=>{
+    const name=f.name||f,size=f.size!=null?fmtBytes(f.size):'';
+    const parts=name.split('.'),ext=parts.length>1?parts.pop().toLowerCase():'',type=fileType(ext);
+    return`<tr><td class="filename">${esc(name)}</td><td><span class="type-badge ${type}">${type}</span></td>
+      <td class="size-cell">${size}</td>
+      <td><a class="download-btn" href="/serve/${encodeURIComponent(name)}" download>Save</a>
+      <button class="delete-btn" onclick="deleteFile('${esc(name)}')">Delete</button></td></tr>`;
   }).join('');
 }
-
 async function deleteFile(name) {
-  if (!confirm(`Delete "${name}"?`)) return;
+  if(!confirm(`Delete "${name}"?`))return;
   try {
-    const res = await fetch(`/files/${encodeURIComponent(name)}`, { method: 'DELETE' });
-    if (res.ok) loadFiles();
-    else {
-      const err = await res.json().catch(() => ({}));
-      alert(err.detail || 'Delete failed');
-    }
-  } catch { alert('Could not reach server'); }
+    const res=await fetch(`/files/${encodeURIComponent(name)}`,{method:'DELETE'});
+    if(res.ok)loadFiles(); else{const e=await res.json().catch(()=>({}));alert(e.detail||'Delete failed');}
+  } catch{alert('Could not reach server');}
 }
-
 function initFileSearch() {
-  els.fileSearch.addEventListener('input', () => {
-    const q = els.fileSearch.value.toLowerCase();
-    renderFiles(S.storageData.filter((f) => (f.name||f).toLowerCase().includes(q)));
+  els.fileSearch.addEventListener('input',()=>{
+    const q=els.fileSearch.value.toLowerCase();
+    renderFiles(S.storageData.filter((f)=>(f.name||f).toLowerCase().includes(q)));
   });
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────────
 function init() {
-  initNav();
-  initUrlInput();
-  initFormatSelector();
-  initPresets();
-  initPreview();
-  initNotifications();
-  initSchedule();
-  initUpdateBtn();
-  initFileSearch();
-
+  initNav(); initUrlInput(); initFormatSelector(); initPresets();
+  initPreview(); initNotifications(); initSchedule(); initUpdateBtn(); initFileSearch();
   els.refreshBtn.addEventListener('click', loadFiles);
   els.refreshScheduledBtn.addEventListener('click', loadScheduled);
-
   els.clearHistoryBtn.addEventListener('click', () => {
-    if (!confirm('Clear all history?')) return;
-    S.history = [];
-    localStorage.removeItem('fetchr_history');
-    renderHistory();
+    if(!confirm('Clear all history?'))return;
+    S.history=[]; localStorage.removeItem('fetchr_history'); renderHistory();
   });
-
   els.exportCsvBtn.addEventListener('click',  () => exportHistory('csv'));
   els.exportJsonBtn.addEventListener('click', () => exportHistory('json'));
-
-  renderHistory();
-  checkServer();
-  setInterval(checkServer, 20000);
+  renderHistory(); checkServer(); setInterval(checkServer, 20000);
   setStatus('idle', 'Ready', 'Waiting for a link');
 }
 

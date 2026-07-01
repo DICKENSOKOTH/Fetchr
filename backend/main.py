@@ -3,7 +3,10 @@ main.py — Fetchr Production Server
 """
 
 import os
+import re
+import io
 import uuid
+import zipfile
 import asyncio
 import time
 import subprocess
@@ -15,7 +18,7 @@ from typing import Dict, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse
 from pydantic import BaseModel
 
 from backend.downloader import (
@@ -57,6 +60,11 @@ def clean_old_jobs():
     cutoff = time.time() - 3600
     for jid in [k for k, v in list(jobs.items()) if v.get("created_at", 0) < cutoff]:
         del jobs[jid]
+
+
+def safe_zip_name(name: str) -> str:
+    cleaned = re.sub(r'[<>:"/\\|?*]', '-', name).strip()
+    return (cleaned[:80] or "download")
 
 
 # ── Frontend path ─────────────────────────────────────────────────────────────
@@ -176,10 +184,7 @@ def delete_file(filename: str):
 
 @app.get("/serve/{filepath:path}")
 def serve_file(filepath: str):
-    """
-    Stream a single file to the user's browser then delete it from the server.
-    The file lands on the user's device. Server stays clean.
-    """
+    """Manual save link used in the Files tab. Streams one file, then deletes it."""
     safe      = os.path.normpath(filepath)
     full_path = os.path.abspath(os.path.join(DOWNLOAD_DIR, safe))
 
@@ -191,7 +196,6 @@ def serve_file(filepath: str):
     filename = os.path.basename(full_path)
 
     def file_iterator(path: str):
-        """Read file in chunks and delete after fully sent."""
         try:
             with open(path, "rb") as f:
                 while True:
@@ -200,14 +204,11 @@ def serve_file(filepath: str):
                         break
                     yield chunk
         finally:
-            # Delete file from server after streaming completes or fails
             try:
                 os.remove(path)
-                # Remove parent folder if it's now empty
                 parent = os.path.dirname(path)
-                if parent != DOWNLOAD_DIR and os.path.isdir(parent):
-                    if not os.listdir(parent):
-                        os.rmdir(parent)
+                if parent != DOWNLOAD_DIR and os.path.isdir(parent) and not os.listdir(parent):
+                    os.rmdir(parent)
             except Exception:
                 pass
 
@@ -216,10 +217,118 @@ def serve_file(filepath: str):
         file_iterator(full_path),
         media_type="application/octet-stream",
         headers={
-            "Content-Disposition":       f"attachment; filename*=UTF-8''{encoded_name}",
-            "Content-Length":            str(os.path.getsize(full_path)),
-            "X-Content-Type-Options":    "nosniff",
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}",
+            "Content-Length":      str(os.path.getsize(full_path)),
         }
+    )
+
+
+@app.get("/serve-job/{job_id}")
+def serve_job(job_id: str):
+    """
+    Auto-trigger endpoint. A pre-opened tab navigates here once a job finishes.
+    Single file  -> streamed directly as an attachment.
+    Multiple files (playlist/album) -> zipped in memory and streamed as one file.
+    All source files are deleted from the server once the response finishes.
+    """
+    job = jobs.get(job_id)
+    if not job:
+        return HTMLResponse(
+            "<body style='background:#0c0c0e;color:#f0f0f5;font-family:sans-serif;"
+            "display:flex;align-items:center;justify-content:center;height:100vh'>"
+            "<p>This download link has expired.</p></body>",
+            status_code=404,
+        )
+    if job.get("status") != "done":
+        return HTMLResponse(
+            "<body style='background:#0c0c0e;color:#f0f0f5;font-family:sans-serif;"
+            "display:flex;align-items:center;justify-content:center;height:100vh'>"
+            "<p>Still processing — the original tab has the progress.</p></body>",
+            status_code=409,
+        )
+
+    files = job.get("files") or []
+    abs_paths = []
+    for rel in files:
+        safe = os.path.normpath(rel)
+        full = os.path.abspath(os.path.join(DOWNLOAD_DIR, safe))
+        if full.startswith(os.path.abspath(DOWNLOAD_DIR)) and os.path.exists(full):
+            abs_paths.append(full)
+
+    if not abs_paths:
+        return HTMLResponse(
+            "<body style='background:#0c0c0e;color:#f0f0f5;font-family:sans-serif;"
+            "display:flex;align-items:center;justify-content:center;height:100vh'>"
+            "<p>No files were produced for this download.</p></body>",
+            status_code=404,
+        )
+
+    # ── Single file ──────────────────────────────────────────────────────────
+    if len(abs_paths) == 1:
+        path     = abs_paths[0]
+        filename = os.path.basename(path)
+
+        def iterator():
+            try:
+                with open(path, "rb") as f:
+                    while True:
+                        chunk = f.read(65536)
+                        if not chunk:
+                            break
+                        yield chunk
+            finally:
+                try:
+                    os.remove(path)
+                    parent = os.path.dirname(path)
+                    if parent != DOWNLOAD_DIR and os.path.isdir(parent) and not os.listdir(parent):
+                        os.rmdir(parent)
+                except Exception:
+                    pass
+
+        encoded = urllib.parse.quote(filename)
+        return StreamingResponse(
+            iterator(),
+            media_type="application/octet-stream",
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{encoded}",
+                "Content-Length":      str(os.path.getsize(path)),
+            }
+        )
+
+    # ── Multiple files: zip on the fly ──────────────────────────────────────
+    zip_name = safe_zip_name(job.get("title") or "fetchr-download") + ".zip"
+
+    def zip_iterator():
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for path in abs_paths:
+                zf.write(path, os.path.basename(path))
+        buf.seek(0)
+        try:
+            while True:
+                chunk = buf.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            for path in abs_paths:
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
+            if abs_paths:
+                parent = os.path.dirname(abs_paths[0])
+                try:
+                    if parent != DOWNLOAD_DIR and os.path.isdir(parent) and not os.listdir(parent):
+                        os.rmdir(parent)
+                except Exception:
+                    pass
+
+    encoded_zip = urllib.parse.quote(zip_name)
+    return StreamingResponse(
+        zip_iterator(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_zip}"}
     )
 
 
@@ -351,7 +460,6 @@ def _run_download(job_id: str, url: str, mode: str, quality: str, audio_fmt: str
                 "type":       result.get("type", mode),
                 "speed":      0,
                 "track_info": "",
-                # List of relative paths ready to serve to browser
                 "files":      result.get("files", []),
             })
         else:

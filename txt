@@ -1,0 +1,57 @@
+'use client'
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
+import { useAuthStore } from '@/stores/authStore'
+import { useUIStore } from '@/stores/uiStore'
+import { ReplyModeToggle, WAStatusBadge } from '@/components/ui'
+import { cn } from '@/lib/utils'
+
+const NAV = [
+  { href: '/dashboard',     label: 'Dashboard',    icon: '◈' },
+  { href: '/dashboard/contacts',      label: 'Contacts',     icon: '◉' },
+  { href: '/dashboard/conversations', label: 'Conversations',icon: '◎' },
+  { href: '/dashboard/dates',         label: 'Dates',        icon: '◷' },
+  { href: '/dashboard/analytics',     label: 'Analytics',    icon: '◬' },
+  { href: '/dashboard/settings',      label: 'Settings',     icon: '◌' },
+]
+
+export function Sidebar() {
+  const pathname = usePathname()
+  const { user } = useAuthStore()
+  const { replyMode, setReplyMode, waStatus } = useUIStore()
+
+  return (
+    <aside className="flex flex-col flex-shrink-0 h-screen border-r border-border" style={{ width: 190, background: 'var(--bg-elevated)' }}>
+      <div className="px-4 pt-5 pb-6">
+        <div className="font-mono text-[22px] font-semibold tracking-[-0.01em] text-gold leading-none">Aura</div>
+        <div className="text-[8px] font-mono tracking-[0.18em] text-ink-muted mt-1 uppercase">Dating Intelligence</div>
+      </div>
+      <nav className="flex flex-col gap-0.5 px-2 flex-1">
+        {NAV.map((item) => (
+          <Link key={item.href} href={item.href} className={cn('nav-item', pathname.startsWith(item.href) && 'active')}>
+            <span className="text-[13px] opacity-70">{item.icon}</span>
+            <span>{item.label}</span>
+          </Link>
+        ))}
+      </nav>
+      <div className="px-3 py-3 border-t border-border">
+        <WAStatusBadge status={waStatus} />
+      </div>
+      <div className="px-3 pb-3">
+        <div className="text-[8px] font-mono tracking-[0.12em] text-ink-muted mb-2 uppercase">Reply Mode</div>
+        <ReplyModeToggle value={replyMode} onChange={setReplyMode} />
+      </div>
+      {user && (
+        <div className="flex items-center gap-2.5 px-3 py-3 border-t border-border">
+          <div className="w-7 h-7 rounded-full flex items-center justify-center text-black text-[12px] font-bold flex-shrink-0" style={{ background: 'var(--gold)' }}>
+            {user.name[0].toUpperCase()}
+          </div>
+          <div className="min-w-0">
+            <div className="text-[11px] font-medium text-ink truncate">{user.name}</div>
+            <div className="text-[9px] text-ink-muted capitalize truncate">{user.plan_tier}</div>
+          </div>
+        </div>
+      )}
+    </aside>
+  )
+}
