@@ -1,5 +1,19 @@
 /* Fetchr — app.js */
 
+// Get backend URL from Netlify environment variable 
+const API = "https://fetchr-7plj.onrender.com";
+
+const originalFetch = window.fetch;
+
+window.fetch = (url, options) => {
+  if (url.startsWith("/")) {
+    url = API + url;
+  }
+
+  return originalFetch(url, options);
+};
+
+//end of fetch override
 const WS_PROTO = location.protocol === 'https:' ? 'wss' : 'ws';
 const WS_BASE = `${WS_PROTO}://${location.host}`;
 
