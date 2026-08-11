@@ -34,7 +34,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse
 from pydantic import BaseModel
 
-from backend.downloader import (
+from .downloader import (
     download, preview_url, get_storage_info, DOWNLOAD_DIR,
     _youtube_clients, _make_ea, _has_cookies, _cookies_path,
 )
@@ -140,6 +140,13 @@ def _extract_stream_info(url: str, mode: str, quality: str, audio_fmt: str) -> d
     """
     proxy = os.environ.get("FETCHR_PROXY")
 
+    # Use BASE_DIR (same folder as main.py) to find cookies.txt reliably on Render.
+    # _has_cookies() from downloader uses downloader.py __file__ which is the same
+    # folder, but being explicit here avoids any path ambiguity on the server.
+    cookies_file = os.path.join(BASE_DIR, "cookies.txt")
+    has_cookies  = os.path.isfile(cookies_file) and os.path.getsize(cookies_file) > 0
+    print(f"[stream] cookies: {has_cookies} @ {cookies_file}", flush=True)
+
     if mode == "audio":
         fmt = "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best"
     else:
@@ -151,7 +158,17 @@ def _extract_stream_info(url: str, mode: str, quality: str, audio_fmt: str) -> d
         else:
             fmt = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
 
-    clients  = _youtube_clients() if "youtu" in url.lower() else [None]
+    # tv_embedded bypasses YouTube bot detection on datacenter IPs and is first
+    # in the list regardless of cookies. Web-based clients are tried as fallbacks.
+    if "youtu" in url.lower():
+        clients = (
+            ["tv_embedded", "web", "web_creator", "mweb"]
+            if has_cookies else
+            ["tv_embedded", "web_creator", "android", "ios"]
+        )
+    else:
+        clients = [None]
+
     last_err = "Could not extract stream info"
 
     for client in clients:
@@ -166,8 +183,8 @@ def _extract_stream_info(url: str, mode: str, quality: str, audio_fmt: str) -> d
             }
             if ea:
                 opts["extractor_args"] = ea
-            if _has_cookies():
-                opts["cookiefile"] = _cookies_path()
+            if has_cookies:
+                opts["cookiefile"] = cookies_file
             if proxy:
                 opts["proxy"] = proxy
 
@@ -768,6 +785,139 @@ def delete_file(filename: str):
         return {"status": "deleted", "file": filename}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@app.get("/download-queue")
+def download_queue(jobs: str = ""):
+    """
+    Single-tab download manager.
+    Handles ALL downloads (singles and playlists) in ONE tab.
+    - Desktop: auto-triggers file downloads via a.click()
+    - Mobile: shows Tap-to-Save buttons (more reliable than auto-trigger)
+    Shows live progress for every job simultaneously.
+    """
+    job_ids = [j.strip() for j in jobs.split(",") if j.strip()]
+    if not job_ids:
+        return HTMLResponse("<body style='background:#0c0c0e;color:#f0f0f5;font-family:sans-serif;"
+                            "display:flex;align-items:center;justify-content:center;height:100vh'>"
+                            "<p>No downloads specified.</p></body>", status_code=400)
+
+    jobs_json = str(job_ids).replace("'", '"')
+
+    html = f"""<!DOCTYPE html><html><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fetchr Downloads</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+     background:#0c0c0e;color:#f0f0f5;padding:24px;min-height:100vh}}
+h1{{font-size:18px;font-weight:800;letter-spacing:-.02em;margin-bottom:20px;color:#f0f0f5}}
+.item{{background:#111116;border:1px solid #2a2a35;border-radius:10px;
+       padding:14px 16px;margin-bottom:10px;transition:border-color .2s}}
+.item.is-done{{border-color:#3dffa0}}.item.is-error{{border-color:#ff4f4f}}
+.item.is-active{{border-color:#4fa8ff}}
+.title{{font-size:13px;font-weight:600;margin-bottom:5px;
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+.status{{font-family:monospace;font-size:11px;color:#9090a8;min-height:14px}}
+.track{{font-family:monospace;font-size:11px;color:#b47fff;margin-top:2px;min-height:13px}}
+.bw{{margin-top:8px;height:3px;background:#2a2a35;border-radius:2px;overflow:hidden}}
+.bar{{height:100%;border-radius:2px;width:0%;transition:width .3s;background:#4fa8ff}}
+.bar.done{{background:#3dffa0}}.bar.err{{background:#ff4f4f}}
+.save-btn{{display:inline-block;margin-top:10px;padding:9px 20px;
+           background:#e8ff47;color:#0c0c0e;border-radius:7px;
+           font-size:13px;font-weight:700;text-decoration:none;cursor:pointer}}
+.done-lbl{{font-family:monospace;font-size:12px;color:#3dffa0;margin-top:7px}}
+.err-lbl {{font-family:monospace;font-size:12px;color:#ff4f4f; margin-top:7px}}
+.footer{{margin-top:24px;font-family:monospace;font-size:11px;color:#55556a;text-align:center}}
+</style></head>
+<body>
+<h1>Downloads</h1>
+<div id="list"></div>
+<p class="footer" id="footer"></p>
+<script>
+const JOBS = {jobs_json};
+const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+const state = {{}};
+JOBS.forEach(id => {{ state[id] = {{status:'queued',title:id,percent:0,message:'Queued',track_info:''}}; }});
+const triggered = {{}};
+
+function esc(s){{ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }}
+
+function render(){{
+  const list = document.getElementById('list');
+  let done=0, err=0;
+  list.innerHTML = JOBS.map(id => {{
+    const j = state[id];
+    const pct = Math.min(Math.round(j.percent||0),100);
+    let cls = j.status==='done'?'is-done':j.status==='error'?'is-error':j.status==='downloading'?'is-active':'';
+    let barCls = j.status==='done'?'done':j.status==='error'?'err':'';
+    let bottom = '';
+    if(j.status==='done'){{
+      done++;
+      if(isMobile){{
+        bottom = `<a class="save-btn" href="/serve-job/${{id}}">Tap to Save</a>`;
+      }} else {{
+        bottom = `<p class="done-lbl">&#10003; Saved to Downloads</p>`;
+      }}
+    }} else if(j.status==='error'){{
+      err++;
+      bottom = `<p class="err-lbl">&#10007; ${{esc(j.message||'Failed')}}</p>`;
+    }} else {{
+      bottom = `<div class="bw"><div class="bar ${{barCls}}" style="width:${{pct}}%"></div></div>
+                <p class="status">${{esc(j.message||'Processing…')}}</p>
+                <p class="track">${{esc(j.track_info||'')}}</p>`;
+    }}
+    return `<div class="item ${{cls}}">
+      <div class="title">${{esc(j.title||id)}}</div>
+      ${{bottom}}
+    </div>`;
+  }}).join('');
+  const total=JOBS.length;
+  const f=document.getElementById('footer');
+  if(done+err===total){{
+    f.textContent = done===total?'All downloads complete — you can close this tab.'
+                                :`${{done}} downloaded, ${{err}} failed.`;
+  }} else {{
+    f.textContent = `${{done+err}} of ${{total}} complete`;
+  }}
+}}
+
+function autoDownload(jobId){{
+  if(isMobile || triggered[jobId]) return;
+  triggered[jobId] = true;
+  const a = document.createElement('a');
+  a.href = '/serve-job/' + jobId;
+  a.download = '';
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {{ try{{ document.body.removeChild(a); }}catch{{}} }}, 2000);
+}}
+
+async function pollJob(jobId){{
+  while(true){{
+    await new Promise(r=>setTimeout(r,1000));
+    try{{
+      const r = await fetch('/job/'+jobId);
+      if(!r.ok){{
+        state[jobId] = {{...state[jobId], status:'error', message:'Job not found'}};
+        render(); break;
+      }}
+      const j = await r.json();
+      state[jobId] = j;
+      render();
+      if(j.status==='done'){{ autoDownload(jobId); break; }}
+      if(j.status==='error'){{ break; }}
+    }} catch(e){{ await new Promise(r=>setTimeout(r,2000)); }}
+  }}
+}}
+
+render();
+JOBS.forEach(pollJob);
+</script></body></html>"""
+    return HTMLResponse(html)
+
 
 
 @app.get("/preview")

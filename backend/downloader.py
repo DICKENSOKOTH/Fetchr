@@ -40,8 +40,8 @@ VIDEO_DOMAINS = [
 ]
 VIDEO_PATH_HINTS = [".m3u8",".m3u","/stream","/watch","/video","/play"]
 
-YOUTUBE_CLIENTS_NO_COOKIES   = ["android","ios","tv_embedded","web_creator"]
-YOUTUBE_CLIENTS_WITH_COOKIES = ["web","web_creator","web_safari","mweb"]
+YOUTUBE_CLIENTS_NO_COOKIES   = ["tv_embedded","web_creator","android","ios"]
+YOUTUBE_CLIENTS_WITH_COOKIES = ["tv_embedded","web","web_creator","mweb"]
 
 TIKTOK_API_HOSTS = [
     "api22-normal-c-useast2a.tiktokv.com",
