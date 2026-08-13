@@ -13,17 +13,17 @@ import shutil
 from pathlib import Path
 from typing import Optional, Callable
 
-# ── Paths ──────────────────────────────────────────────────────────────────────
+#Paths ─
 DOWNLOAD_DIR = str(Path.home() / "Downloads" / "Fetchr")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 PROXY: Optional[str] = os.environ.get("FETCHR_PROXY", None)
 
-# ── Shared folder names ────────────────────────────────────────────────────────
+#Shared folder names 
 TIKTOK_FOLDER          = "TikTok"
 YOUTUBE_SINGLES_FOLDER = "YouTube"
 
-# ── Constants ──────────────────────────────────────────────────────────────────
+#Constants 
 DIRECT_EXTS = {
     "pdf","zip","rar","7z","tar","gz","bz2","exe","dmg","apk","msi","deb",
     "mp3","mp4","mkv","avi","mov","webm","flv","wmv","m4a","aac","ogg",
@@ -68,7 +68,7 @@ AUDIO_FORMAT_MAP = {
 }
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
+#Helpers
 def _cookies_path() -> str:
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
 
@@ -81,7 +81,7 @@ def _youtube_clients() -> list:
     return YOUTUBE_CLIENTS_WITH_COOKIES if _has_cookies() else YOUTUBE_CLIENTS_NO_COOKIES
 
 
-# ── Type detection ─────────────────────────────────────────────────────────────
+#Type detection 
 def detect_type(url: str) -> str:
     clean = url.split("?")[0].lower()
     ext   = clean.split(".")[-1]
@@ -112,7 +112,7 @@ def probe_url(url: str) -> str:
     return "ydlp"
 
 
-# ── Folder name helpers ────────────────────────────────────────────────────────
+#Folder name helpers 
 def clean_folder_name(name: str) -> str:
     name = re.sub(r'^(album|playlist|ep|single)\s*[-:]\s*', '', name, flags=re.IGNORECASE)
     return name.strip()
@@ -141,7 +141,7 @@ def build_playlist_folder(info: dict) -> str:
     return safe_folder(folder)
 
 
-# ── Base yt-dlp options ────────────────────────────────────────────────────────
+#Base yt-dlp options 
 def _base_opts(progress_hook: Optional[Callable]) -> dict:
     opts = {
         "noplaylist":                 False,
@@ -168,7 +168,7 @@ def _base_opts(progress_hook: Optional[Callable]) -> dict:
     return opts
 
 
-# ── Video opts ─────────────────────────────────────────────────────────────────
+#Video opts
 def build_video_opts(
     quality: str,
     progress_hook: Optional[Callable],
@@ -196,7 +196,7 @@ def build_video_opts(
     return opts
 
 
-# ── Audio opts ─────────────────────────────────────────────────────────────────
+#Audio opts
 def build_audio_opts(
     fmt: str,
     progress_hook: Optional[Callable],
@@ -229,7 +229,7 @@ def build_audio_opts(
     return opts
 
 
-# ── TikTok video opts ──────────────────────────────────────────────────────────
+#TikTok video opts 
 def build_tiktok_video_opts(
     quality: str,
     progress_hook: Optional[Callable],
@@ -253,12 +253,12 @@ def build_tiktok_video_opts(
     return opts
 
 
-# ── extractor_args builder ─────────────────────────────────────────────────────
+#extractor_args builder 
 def _make_ea(client: str) -> dict:
     return {"youtube": {"player_client": [client], "js_runtimes": ["nodejs"]}}
 
 
-# ── Collect finished files via postprocessor hook ──────────────────────────────
+#Collect finished files via postprocessor hook 
 def _make_collector(collected: list):
     """Returns a postprocessor hook that records final output filenames."""
     def _pp_hook(d: dict):
@@ -269,7 +269,7 @@ def _make_collector(collected: list):
     return _pp_hook
 
 
-# ── Playlist result inspector ──────────────────────────────────────────────────
+#Playlist result inspector 
 def _playlist_result(info: Optional[dict], mode: str, collected: list) -> dict:
     if info is None:
         return {"status": "error", "message": "yt-dlp returned no data. Content may be private, deleted, or region-locked."}
@@ -303,7 +303,7 @@ def _playlist_result(info: Optional[dict], mode: str, collected: list) -> dict:
     }
 
 
-# ── YouTube download ───────────────────────────────────────────────────────────
+#YouTube download 
 def download_youtube(url: str, mode: str, quality_or_fmt: str,
                      progress_hook: Optional[Callable] = None) -> dict:
     clients    = _youtube_clients()
@@ -396,7 +396,7 @@ def download_youtube(url: str, mode: str, quality_or_fmt: str,
     raise Exception(last_error)
 
 
-# ── TikTok download ────────────────────────────────────────────────────────────
+#TikTok download 
 def download_tiktok(url: str, mode: str, quality_or_fmt: str,
                     progress_hook: Optional[Callable] = None) -> dict:
     last_error = "Unknown error"
@@ -430,7 +430,7 @@ def download_tiktok(url: str, mode: str, quality_or_fmt: str,
     raise Exception(last_error)
 
 
-# ── Generic video download ─────────────────────────────────────────────────────
+#Generic video download 
 def download_generic_video(url: str, mode: str, quality_or_fmt: str,
                            progress_hook: Optional[Callable] = None) -> dict:
     ea        = {"youtube": {"js_runtimes": ["nodejs"]}}
@@ -447,7 +447,7 @@ def download_generic_video(url: str, mode: str, quality_or_fmt: str,
         return _playlist_result(info, mode, collected)
 
 
-# ── Direct file download ───────────────────────────────────────────────────────
+#Direct file download
 def _get_filename(r: requests.Response, url: str) -> str:
     cd = r.headers.get("Content-Disposition", "")
     if "filename=" in cd:
@@ -490,7 +490,7 @@ def download_file(url: str, progress_hook: Optional[Callable] = None) -> dict:
     return {"status": "done", "type": "file", "title": filename, "files": [filename]}
 
 
-# ── Preview ────────────────────────────────────────────────────────────────────
+#Preview
 def preview_url(url: str) -> dict:
     opts = {
         "quiet":         True,
@@ -522,7 +522,7 @@ def preview_url(url: str) -> dict:
     }
 
 
-# ── Storage info ───────────────────────────────────────────────────────────────
+#Storage info 
 def get_storage_info() -> dict:
     files = []
     total_bytes = 0
@@ -548,7 +548,7 @@ def get_storage_info() -> dict:
     }
 
 
-# ── Main entry ─────────────────────────────────────────────────────────────────
+#Main entry
 def download(
     url: str,
     mode: str = "video",

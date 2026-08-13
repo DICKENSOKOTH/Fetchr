@@ -34,12 +34,17 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse
 from pydantic import BaseModel
 
-from .downloader import (
+try:
+    from backend.downloader import (
     download, preview_url, get_storage_info, DOWNLOAD_DIR,
     _youtube_clients, _make_ea, _has_cookies, _cookies_path,
 )
-
-# ── App ───────────────────────────────────────────────────────────────────────
+except:
+    from downloader import (
+    download, preview_url, get_storage_info, DOWNLOAD_DIR,
+    _youtube_clients, _make_ea, _has_cookies, _cookies_path,
+)
+#App
 app = FastAPI(title="Fetchr", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
@@ -101,7 +106,7 @@ def esc_html(s: str) -> str:
     return str(s).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
 
 
-# ── Frontend path ─────────────────────────────────────────────────────────────
+#Frontend path
 _local  = os.path.join(BASE_DIR, "frontend")
 _parent = os.path.join(BASE_DIR, "..", "frontend")
 FRONTEND_DIR = os.path.abspath(_local if os.path.exists(_local) else _parent)
@@ -109,7 +114,7 @@ print(f"Frontend  : {FRONTEND_DIR}")
 print(f"Downloads : {DOWNLOAD_DIR}")
 
 
-# ── ffmpeg discovery ──────────────────────────────────────────────────────────
+#ffmpeg discovery 
 def _find_ffmpeg() -> Optional[str]:
     """
     Find ffmpeg binary.
@@ -126,7 +131,7 @@ def _find_ffmpeg() -> Optional[str]:
         return None
 
 
-# ── yt-dlp stream info extraction (Python API, no subprocess) ─────────────────
+#yt-dlp stream info extraction (Python API, no subprocess) 
 def _extract_stream_info(url: str, mode: str, quality: str, audio_fmt: str) -> dict:
     """
     Use the yt-dlp Python API to extract direct CDN URL(s) and the real title.
@@ -207,7 +212,7 @@ def _extract_stream_info(url: str, mode: str, quality: str, audio_fmt: str) -> d
             title = info.get("title") or "download"
             all_formats = info.get("formats") or []
 
-            # ── Audio mode ────────────────────────────────────────────────────
+            #Audio mode ─
             if mode == "audio":
                 # Audio-only streams (no video codec)
                 audio_only = sorted(
@@ -252,7 +257,7 @@ def _extract_stream_info(url: str, mode: str, quality: str, audio_fmt: str) -> d
                     "needs_merge":  False,
                 }
 
-            # ── Video mode ────────────────────────────────────────────────────
+            #Video mode 
             else:
                 # Check if yt-dlp selected separate video+audio streams (needs merging)
                 req_fmts = info.get("requested_formats") or []
@@ -320,7 +325,7 @@ def _extract_stream_info(url: str, mode: str, quality: str, audio_fmt: str) -> d
     return {"error": last_err}
 
 
-# ── Background tasks ──────────────────────────────────────────────────────────
+#Background tasks 
 @app.on_event("startup")
 async def startup():
     asyncio.create_task(scheduler_loop())
@@ -365,7 +370,7 @@ def _do_ytdlp_update() -> dict:
         return {"status": "error", "message": str(e)}
 
 
-# ── Models ────────────────────────────────────────────────────────────────────
+#Models
 class DownloadRequest(BaseModel):
     url:       str
     mode:      str = "video"
@@ -380,7 +385,7 @@ class ScheduleRequest(BaseModel):
     run_at:    float
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+#Routes
 
 @app.get("/health")
 def health():
@@ -453,7 +458,7 @@ async def stream_download(
 
     ffmpeg = _find_ffmpeg()
 
-    # ── Path A: Video merge (two separate streams → one file) ─────────────────
+    #Path A: Video merge (two separate streams → one file) 
     if needs_merge and ffmpeg:
         audio_url     = info.get("audio_url", "")
         audio_headers = info.get("audio_headers") or {}
@@ -497,7 +502,7 @@ async def stream_download(
 
         return StreamingResponse(merge_stream(), media_type=mime, headers=resp_headers)
 
-    # ── Path B: Audio conversion via ffmpeg ───────────────────────────────────
+    #Path B: Audio conversion via ffmpeg 
     if needs_ffmpeg and ffmpeg:
         codec_args  = AUDIO_CODEC.get(audio_fmt, AUDIO_CODEC["mp3"])
 
@@ -533,7 +538,7 @@ async def stream_download(
 
         return StreamingResponse(audio_conv_stream(), media_type=mime, headers=resp_headers)
 
-    # ── Path C: Direct proxy (native format, no conversion needed) ────────────
+    #Path C: Direct proxy (native format, no conversion needed) 
     # Also used as fallback when ffmpeg is missing
     if needs_ffmpeg and not ffmpeg:
         # ffmpeg not available — serve native format instead of 0 bytes
