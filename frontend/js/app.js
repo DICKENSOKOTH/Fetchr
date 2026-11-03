@@ -117,7 +117,7 @@ function fmtDuration(secs) {
   return `${m}:${String(s).padStart(2,'0')}`;
 }
 
-// ── Navigation ─────────────────────────────────────────────────────────────────
+//Navigation 
 function initNav() {
   document.querySelectorAll('.nav-item').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -173,7 +173,7 @@ function initFormatSelector() {
   updateSummary();
 }
 
-// ── Presets ────────────────────────────────────────────────────────────────────
+//Presets
 function renderPresets() {
   const sel = els.presetSelect;
   sel.innerHTML = '<option value="">Load preset...</option>';
@@ -205,7 +205,7 @@ function initPresets() {
   };
 }
 
-// ── Notifications ──────────────────────────────────────────────────────────────
+//Notifications 
 function initNotifications() {
   updateNotifBtn();
   els.notifBtn.onclick = async () => {
@@ -227,7 +227,7 @@ function sendNotification(title, body) {
   new Notification(`Fetchr: ${title}`, { body });
 }
 
-// ── Preview ────────────────────────────────────────────────────────────────────
+// Preview
 function initPreview() {
   els.inspectBtn.onclick = async () => {
     const url = els.urlInput.value.trim(); if (!url) return;
@@ -250,7 +250,7 @@ function initPreview() {
   els.previewClose.onclick = () => els.previewPanel.classList.add('hidden');
 }
 
-// ── yt-dlp update ──────────────────────────────────────────────────────────────
+// yt-dlp update
 function initUpdateBtn() {
   els.updateBtn.onclick = async () => {
     els.updateBtn.disabled = true; els.updateBtn.textContent = 'Updating...';
@@ -265,7 +265,7 @@ function initUpdateBtn() {
   };
 }
 
-// ── Schedule ───────────────────────────────────────────────────────────────────
+// Schedule 
 function initSchedule() {
   els.scheduleBtn.onclick = async () => {
     const url = els.urlInput.value.trim(), dt = els.scheduleInput.value;
@@ -315,7 +315,7 @@ async function cancelScheduled(id) {
   await fetch(`/scheduled/${id}`, { method: 'DELETE' }); loadScheduled();
 }
 
-// ── Server health ──────────────────────────────────────────────────────────────
+// Server health 
 async function checkServer() {
   try {
     const r = await fetch('/health', { signal: AbortSignal.timeout(3000) });
@@ -344,7 +344,7 @@ function initUrlInput() {
   els.downloadBtn.addEventListener('click', startDownload);
 }
 
-// ── Status panel ───────────────────────────────────────────────────────────────
+// Status panel 
 function setStatus(type, title, detail) {
   els.statusPanel.className    = `status-panel${type !== 'idle' ? ` is-${type}` : ''}`;
   els.statusIconWrap.innerHTML = ICONS[type] || ICONS.idle;
@@ -370,7 +370,7 @@ function setProgress(pct, indeterminate = false) {
   }
 }
 
-// ── Download ───────────────────────────────────────────────────────────────────
+// Download 
 //
 // KEY DESIGN: Always open exactly ONE new tab, regardless of how many URLs
 // are pasted. That single tab navigates to /download-queue which manages
@@ -456,7 +456,7 @@ async function startDownload() {
   }
 }
 
-// ── WebSocket + poll (progress in the main app) ────────────────────────────────
+// WebSocket + poll (progress in the main app) 
 function connectWS(jobId, url, qId) {
   let ws;
   try { ws = new WebSocket(`${WS_BASE}/ws/${jobId}`); }
@@ -504,7 +504,7 @@ function onJobUpdate(job, url, qId) {
   }
 }
 
-// ── History ────────────────────────────────────────────────────────────────────
+// History
 function addHistory(entry) {
   entry.timestamp = Date.now(); S.history.unshift(entry);
   if (S.history.length > 50) S.history = S.history.slice(0, 50);
@@ -548,7 +548,7 @@ function exportHistory(format) {
   URL.revokeObjectURL(a.href);
 }
 
-// ── Queue ──────────────────────────────────────────────────────────────────────
+//  Queue 
 let qN = 0;
 function addToQueue(url) {
   const id = ++qN, sh = url.length > 52 ? url.slice(0, 52) + '...' : url;
@@ -598,7 +598,7 @@ function finishQueueItem(id, ok, label) {
   }, 5000);
 }
 
-// ── Files ──────────────────────────────────────────────────────────────────────
+// Files 
 async function loadFiles() {
   els.filesTableBody.innerHTML = '<tr><td colspan="4" class="empty-state">Loading...</td></tr>';
   try {
@@ -653,7 +653,7 @@ function initFileSearch() {
   });
 }
 
-// ── Init ───────────────────────────────────────────────────────────────────────
+//  Init
 function init() {
   initNav(); initUrlInput(); initFormatSelector(); initPresets();
   initPreview(); initNotifications(); initSchedule(); initUpdateBtn(); initFileSearch();
